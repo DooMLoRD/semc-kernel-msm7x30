@@ -167,7 +167,9 @@
 #define MSM_GPU_PHYS_SIZE       SZ_2M
 #define MSM_PMEM_CAMERA_SIZE    0x3200000
 #define MSM_PMEM_ADSP_SIZE      0x1800000
+#if 0
 #define MSM_PMEM_SWIQI_SIZE     0xE00000
+#endif
 #define PMEM_KERNEL_EBI1_SIZE   0x600000
 #define MSM_PMEM_AUDIO_SIZE     0x200000
 
@@ -3099,11 +3101,13 @@ static struct android_pmem_platform_data android_pmem_adsp_cached_pdata = {
 	.cached = 1,
 };
 
+#if 0
 static struct android_pmem_platform_data android_pmem_swiqi_pdata = {
 	.name = "pmem_swiqi",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
 	.cached = 1,
 };
+#endif
 
 static struct android_pmem_platform_data android_pmem_camera_pdata = {
 	.name = "pmem_camera",
@@ -3134,11 +3138,13 @@ static struct platform_device android_pmem_adsp_cached_device = {
 	.id = 5,
 	.dev = {.platform_data = &android_pmem_adsp_cached_pdata},
 };
+#if 0
 static struct platform_device android_pmem_swiqi_device = {
 	.name = "android_pmem",
 	.id = 6,
 	.dev = {.platform_data = &android_pmem_swiqi_pdata},
 };
+#endif
 
 static struct platform_device android_pmem_camera_device = {
 	.name = "android_pmem",
@@ -3497,7 +3503,9 @@ static struct platform_device *devices[] __initdata = {
 	&android_pmem_kernel_ebi1_device,
 	&android_pmem_adsp_device,
 	&android_pmem_adsp_cached_device,
+#if 0
 	&android_pmem_swiqi_device,
+#endif
 	&android_pmem_camera_device,
 	&android_pmem_audio_device,
 	&msm_device_i2c,
@@ -4206,6 +4214,7 @@ static void __init pmem_adsp_cached_size_setup(char **p)
 
 __early_param("pmem_adsp_cached_size=", pmem_adsp_cached_size_setup);
 
+#if 0
 static unsigned pmem_swiqi_size = MSM_PMEM_SWIQI_SIZE;
 static void __init pmem_swiqi_size_setup(char **p)
 {
@@ -4213,6 +4222,7 @@ static void __init pmem_swiqi_size_setup(char **p)
 }
 
 __early_param("pmem_swiqi_size=", pmem_swiqi_size_setup);
+#endif
 
 static unsigned pmem_camera_size = MSM_PMEM_CAMERA_SIZE;
 static void __init pmem_camera_size_setup(char **p)
@@ -4287,6 +4297,7 @@ static void __init msm7x30_allocate_memory_regions(void)
 			"pmem arena\n", size, addr, __pa(addr));
 	}
 
+#if 0
 	size = pmem_swiqi_size;
 
 	if (size) {
@@ -4296,6 +4307,7 @@ static void __init msm7x30_allocate_memory_regions(void)
 		pr_info("allocating %lu bytes at %p (%lx physical) for swiqi "
 			"pmem arena\n", size, addr, __pa(addr));
 	}
+#endif
 
 	size = pmem_camera_size;
 	if (size) {
