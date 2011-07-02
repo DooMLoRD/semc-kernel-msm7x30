@@ -85,9 +85,15 @@ static struct cpufreq_frequency_table freq_table[] = {
 	{ 1, 245760 },
 	{ 2, 368640 },
 	{ 3, 768000 },
-	/* 806.4MHz is updated to 1024MHz at runtime for MSM8x55. */
-	{ 4, 806400 },
-	{ 5, CPUFREQ_TABLE_END },
+	{ 3, 806400 },
+	{ 4, 1017600 },
+	{ 5, 1113600 },
+	{ 6, 1209600 },
+	{ 7, 1305600 },
+	{ 8, 1401600 },
+	{ 9, 1497600 },
+	{ 10, 1516800 },
+	{ 11, CPUFREQ_TABLE_END },
 };
 
 /* Use negative numbers for sources that can't be enabled/disabled */
@@ -107,13 +113,15 @@ static struct clkctl_acpu_speed acpu_freq_tbl[] = {
 	{ MAX_AXI_KHZ, SRC_AXI, 1, 0, 61440000, 900, VDD_RAW(900) },
 	{ 245760, PLL_3,    5, 2,  61440000,  900, VDD_RAW(900) },
 	{ 368640, PLL_3,    5, 1,  122800000, 900, VDD_RAW(900) },
-	/* AXI has MSMC1 implications. See above. */
 	{ 768000, PLL_1,    2, 0,  153600000, 1050, VDD_RAW(1050) },
-	/*
-	 * AXI has MSMC1 implications. See above.
-	 * 806.4MHz is increased to match the SoC's capabilities at runtime
-	 */
-	{ 806400, PLL_2,    3, 0,  UINT_MAX, 1100, VDD_RAW(1100) },
+	{ 806400, PLL_2,    3, 0,  192000000, 1100, VDD_RAW(1100) },
+	{ 1017600, PLL_2,   3, 0, 192000000, 1200, VDD_RAW(1200) },
+	{ 1113600, PLL_2,   3, 0, 192000000, 1200, VDD_RAW(1200) },
+	{ 1209600, PLL_2,   3, 0, 192000000, 1200, VDD_RAW(1200) },
+	{ 1305600, PLL_2,   3, 0, 192000000, 1300, VDD_RAW(1300) },
+	{ 1401600, PLL_2,   3, 0, 192000000, 1300, VDD_RAW(1300) },
+	{ 1497600, PLL_2,   3, 0, 192000000, 1300, VDD_RAW(1300) },
+	{ 1516800, PLL_2,   3, 0, 192000000, 1300, VDD_RAW(1300) },
 	{ 0 }
 };
 
@@ -376,48 +384,48 @@ static void __init lpj_init(void)
 }
 
 /* Update frequency tables for PLL2. */
-void __init pll2_fixup(void)
-{
-	struct clkctl_acpu_speed *speed;
-	struct cpufreq_frequency_table *cpu_freq;
-	u8 pll2_l;
+//void __init pll2_fixup(void)
+//{
+//	struct clkctl_acpu_speed *speed;
+//	struct cpufreq_frequency_table *cpu_freq;
+//	u8 pll2_l;
+//
+//	pll2_l = readl(PLL2_L_VAL_ADDR) & 0xFF;
+//	speed = &acpu_freq_tbl[ARRAY_SIZE(acpu_freq_tbl)-2];
+//	cpu_freq = &freq_table[ARRAY_SIZE(freq_table)-2];
+//
+//	if (speed->acpu_clk_khz != 806400 || cpu_freq->frequency != 806400) {
+//		pr_err("Frequency table fixups for PLL2 rate failed.\n");
+//		BUG();
+//	}
 
-	pll2_l = readl(PLL2_L_VAL_ADDR) & 0xFF;
-	speed = &acpu_freq_tbl[ARRAY_SIZE(acpu_freq_tbl)-2];
-	cpu_freq = &freq_table[ARRAY_SIZE(freq_table)-2];
-
-	if (speed->acpu_clk_khz != 806400 || cpu_freq->frequency != 806400) {
-		pr_err("Frequency table fixups for PLL2 rate failed.\n");
-		BUG();
-	}
-
-	switch (pll2_l) {
-	case PLL2_1024_MHZ:
-		speed->acpu_clk_khz = 1024000;
-		speed->vdd_mv = 1200;
-		speed->vdd_raw = VDD_RAW(1200);
-		cpu_freq->frequency = 1024000;
-		break;
-	case PLL2_1200_MHZ:
-		speed->acpu_clk_khz = 1200000;
-		speed->vdd_mv = 1200;
-		speed->vdd_raw = VDD_RAW(1200);
-		cpu_freq->frequency = 1200000;
-		break;
-	case PLL2_1400_MHZ:
-		speed->acpu_clk_khz = 1400000;
-		speed->vdd_mv = 1250;
-		speed->vdd_raw = VDD_RAW(1250);
-		cpu_freq->frequency = 1400000;
-		break;
-	case PLL2_806_MHZ:
-		/* No fixup necessary */
-		break;
-	default:
-		pr_err("Unknown PLL2 lval %d\n", pll2_l);
-		BUG();
-	}
-}
+//	switch (pll2_l) {
+//	case PLL2_1024_MHZ:
+//		speed->acpu_clk_khz = 1200000;
+//		speed->vdd_mv = 1300;
+//		speed->vdd_raw = VDD_RAW(1300);
+//		cpu_freq->frequency = 1200000;
+//		break;
+//	case PLL2_1200_MHZ:
+//		speed->acpu_clk_khz = 1200000;
+//		speed->vdd_mv = 1200;
+//		speed->vdd_raw = VDD_RAW(1200);
+//		cpu_freq->frequency = 1200000;
+//		break;
+//	case PLL2_1400_MHZ:
+//		speed->acpu_clk_khz = 1400000;
+//		speed->vdd_mv = 1250;
+//		speed->vdd_raw = VDD_RAW(1250);
+//		cpu_freq->frequency = 1400000;
+//		break;
+//	case PLL2_806_MHZ:
+//		/* No fixup necessary */
+//		break;
+//	default:
+//		pr_err("Unknown PLL2 lval %d\n", pll2_l);
+//		BUG();
+//	}
+//}
 
 #define RPM_BYPASS_MASK	(1 << 3)
 #define PMIC_MODE_MASK	(1 << 4)
@@ -429,7 +437,7 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	mutex_init(&drv_state.lock);
 	drv_state.acpu_switch_time_us = clkdata->acpu_switch_time_us;
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
-	pll2_fixup();
+//	pll2_fixup();
 	acpuclk_init();
 	lpj_init();
 #ifdef CONFIG_CPU_FREQ_MSM
