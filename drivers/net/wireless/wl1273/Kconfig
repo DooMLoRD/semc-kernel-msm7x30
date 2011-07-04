@@ -1,0 +1,24 @@
+config WL1273
+	tristate "TI wl1273 support"
+	select FW_LOADER
+	select CRC7
+	default m
+	---help---
+	  This module adds support for wireless adapters based on
+	  TI wl1273 chipset.
+
+	  If you choose to build a module, it'll be called wl1273. Say
+	  N if unsure.
+
+config WL1273_SDIO
+	tristate "TI wl1273 SDIO support"
+	depends on WL1273 && MMC
+	default m
+	---help---
+	  This module adds support for the SDIO interface of adapters using
+	  TI wl1273 chipset.  Select this if your platform is using
+	  the SDIO bus.
+
+	  If you choose to build a module, it'll be called
+	  sdio. Say N if unsure.
+
