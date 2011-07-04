@@ -49,10 +49,10 @@
 #include <linux/mmc/sd.h>
 #include <linux/delay.h>
 
-#include "SdioDrvDbg.h"
-#include "TxnDefs.h"
-#include "SdioAdapter.h"
-#include "SdioDrv.h"
+#include "inc/SdioDrvDbg.h"
+#include "inc/TxnDefs.h"
+#include "inc/SdioAdapter.h"
+#include "inc/SdioDrv.h"
 #include <asm/mach/mmc.h>
 
 static unsigned char *pDmaBufAddr = 0;

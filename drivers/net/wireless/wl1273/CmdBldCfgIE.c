@@ -44,6 +44,7 @@
 #include "inc/CmdQueue_api.h"
 #include "inc/rate.h"
 #include "inc/TwIf.h"
+#include "inc/public_infoele.h"
 
 /****************************************************************************
  *                      cmdBld_CfgIeConfigMemory()

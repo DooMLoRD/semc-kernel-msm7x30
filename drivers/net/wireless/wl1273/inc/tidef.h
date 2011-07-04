@@ -33,9 +33,7 @@
 
 #ifndef TIDEF_H
 #define TIDEF_H
-
 #define __BYTE_ORDER_BIG_ENDIAN
-
 
 #include "osTIType.h"
 

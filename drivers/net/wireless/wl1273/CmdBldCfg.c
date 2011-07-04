@@ -554,11 +554,11 @@ TI_STATUS cmdBld_CfgRateMngDbg (TI_HANDLE  hCmdBld,
 {
 
 	TRateMngParams      *pRateMngParamsDB = &DB_RM(hCmdBld);
-	int uIndex;
+	int uIndex,ratef;
 
 	pRateMngParamsDB->rateMngParams.paramIndex = pRateMngParams->paramIndex;
-
-	switch (pRateMngParams->paramIndex) {
+	ratef = pRateMngParams->paramIndex;
+	switch (ratef) {
 	case RATE_MGMT_RETRY_SCORE_PARAM:
 		pRateMngParamsDB->rateMngParams.RateRetryScore = pRateMngParams->RateRetryScore;
 		break;

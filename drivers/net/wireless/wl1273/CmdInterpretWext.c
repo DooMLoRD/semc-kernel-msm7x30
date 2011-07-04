@@ -34,7 +34,7 @@
 
 #include "inc/tidef.h"
 #include "inc/WlanDrvIf.h"
-//#include "inctiwlnif.h"
+#include "inc/tiwlnif.h"
 #include "inc/osDot11.h"
 #include "inc/802_11Defs.h"
 #include "inc/paramOut.h"

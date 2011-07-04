@@ -52,7 +52,7 @@
 #include "inc/txResult_api.h"
 #include "inc/CmdMBox_api.h"
 #include "inc/rxXfer_api.h"
-//#include "inc/txXfer_api.h"
+#include "inc/txXfer_api.h"
 #include "inc/txHwQueue_api.h"
 #include "inc/eventMbox_api.h"
 #include "inc/TwIf.h"
