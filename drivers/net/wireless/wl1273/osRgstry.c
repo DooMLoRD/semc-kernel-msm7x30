@@ -32,14 +32,7 @@
  */
 
 
-#if defined(_WINDOWS)
-#include <ndis.h>
-#elif defined( __LINUX__ )
 #include "inc/osRgstry_parser.h"
-#elif defined(__ARMCC__)
-#include "inc/osRgstry_parser.h"
-#include "inc/string.h"
-#endif
 #include "inc/WlanDrvIf.h"
 #include "inc/osRgstry.h"
 #include "inc/paramOut.h"

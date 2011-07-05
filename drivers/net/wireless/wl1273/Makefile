@@ -23,14 +23,15 @@ CmdBldCmdIE.o \
 txHwQueue.o txCtrlBlk.o RxQueue.o CmdMBox.o txResult.o txXfer.o \
 FwEvent.o RxXfer.o eventMbox.o HwInit.o fwDebug.o TwIf.o TxnQueue.o SdioBusDrv.o \
 fsm.o GenSM.o report.o queue.o context.o timer.o rate.o freq.o \
+CmdBldCfgIE.o CmdBldItrIE.o osapi.o osmemapi.o osRgstry_parser.o \
+host_platform.o SdioAdapter.o RxBuf.o CmdInterpretWext.o \
+ipc_k.o osRgstry.o
 
 dbg-obj := sconnDebug.o siteMgrDebug.o ctrlDbg.o RxDbg.o TxDbg.o debug.o PowerMgrDebug.o \
 rsnDbg.o TWD_Debug.o measurementDbg.o scanCncnDbg.o qosMngrDbg.o ScanMngrDbg.o \
 roamingMgrDebug.o scrDbg.o SoftGeminiDbg.o HealthMonitorDbg.o smeDebug.o \
 fwdriverdebug.o MibDbg.o TwIfDebug.o
 
-#CmdBldCfgIE.o CmdBldItrIE.o \
-
+EXTRA_CFLAGS += -D HOST_COMPILE
 obj-$(CONFIG_WL1273) += WlanDrvIf.o
 obj-$(CONFIG_WL1273_SDIO) += sdio.o
-
