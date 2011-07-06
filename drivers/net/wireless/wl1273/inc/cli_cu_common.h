@@ -34,6 +34,8 @@
 #ifndef common_h
 #define common_h
 
+#define __LINUX__
+
 #include "tidef.h"
 
 #ifdef _WINDOWS
