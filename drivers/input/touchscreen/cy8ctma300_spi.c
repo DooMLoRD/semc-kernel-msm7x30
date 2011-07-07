@@ -1593,8 +1593,6 @@ static void cy8ctma300_bl_end(struct spi_device *spi)
 		dev_err(&spi->dev, "%s: write/read error\n", __func__);
 		goto end;
 	}
-	/* need to wait after issuing EXIT bootloader mode command */
-	msleep(900);
 	dev_dbg(&spi->dev, "%s: BootloaderExit OK\n", __func__);
 end:
 	mutex_lock(&tp->s_lock);
