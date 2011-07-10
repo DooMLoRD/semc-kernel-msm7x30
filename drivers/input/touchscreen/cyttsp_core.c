@@ -34,6 +34,9 @@
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+#include <linux/workqueue.h>
+#endif
 #include <linux/byteorder/generic.h>
 #include <linux/bitops.h>
 #include <linux/earlysuspend.h>
@@ -49,6 +52,10 @@
 /* value based on linux kernel 2.6.30.10 */
 #define ABS_MT_TRACKING_ID (ABS_MT_BLOB_ID + 1)
 #endif /* ABS_MT_TRACKING_ID */
+
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+#define ESD_CHECK_INTERVAL msecs_to_jiffies(3000)
+#endif
 
 #define	TOUCHSCREEN_TIMEOUT (msecs_to_jiffies(28))
 /* Bootloader File 0 offset */
@@ -101,6 +108,11 @@
 /* maximum number of track IDs */
 #define CY_NUM_TRK_ID               16
 
+/*
+ * maximum number of touch reports with
+ * current touches=0 before performing Driver reset
+ */
+#define CY_MAX_NTCH                 10
 #define CY_NTCH                     0 /* lift off */
 #define CY_TCH                      1 /* touch down */
 #define CY_ST_FNGR1_IDX             0
@@ -165,6 +177,13 @@ struct cyttsp_xydata {
 	u8 gest_set;
 	u8 tt_reserved;
 };
+
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+struct cyttsp_mode {
+	u8 hst_mode;
+	u8 tt_mode;
+};
+#endif
 
 struct cyttsp_xydata_gen2 {
 	u8 hst_mode;
@@ -253,6 +272,9 @@ struct cyttsp {
 	struct device *pdev;
 	int irq;
 	struct input_dev *input;
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+	struct delayed_work work;
+#endif
 	struct mutex mutex;
 	struct early_suspend early_suspend;
 	char phys[32];
@@ -267,6 +289,11 @@ struct cyttsp {
 	struct cyttsp_bus_ops *bus_ops;
 	unsigned fw_loader_mode:1;
 	unsigned suspended:1;
+	atomic_t ntch_count;
+	u16 appid;
+	u16 appver;
+	u16 ttspid;
+	u32 cid;
 };
 
 struct cyttsp_track_data {
@@ -366,7 +393,6 @@ static int ttsp_read_block_data(struct cyttsp *ts, u8 command,
 	u8 length, void *buf)
 {
 	int rc;
-	int tries;
 	DBG(printk(KERN_INFO"%s: Enter\n", __func__);)
 
 	if (!buf || !length) {
@@ -375,9 +401,7 @@ static int ttsp_read_block_data(struct cyttsp *ts, u8 command,
 		return -EIO;
 	}
 
-	for (tries = 0, rc = 1; tries < CY_NUM_RETRY && rc; tries++)
-		rc = ts->bus_ops->read(ts->bus_ops, command, length, buf);
-
+	rc = ts->bus_ops->read(ts->bus_ops, command, length, buf);
 	if (rc < 0)
 		printk(KERN_ERR "%s: error %d\n", __func__, rc);
 	DBG(print_data_block(__func__, command, length, buf);)
@@ -395,6 +419,7 @@ static int ttsp_write_block_data(struct cyttsp *ts, u8 command,
 				__func__, !buf ? "NULL" : "OK", length);
 		return -EIO;
 	}
+
 	rc = ts->bus_ops->write(ts->bus_ops, command, length, buf);
 	if (rc < 0)
 		printk(KERN_ERR "%s: error %d\n", __func__, rc);
@@ -818,6 +843,10 @@ static irqreturn_t cyttsp_irq(int irq, void *handle)
 	retval = ttsp_read_block_data(ts, CY_REG_BASE,
 				      sizeof(xy_data), &xy_data);
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+	schedule_delayed_work(&ts->work, ESD_CHECK_INTERVAL);
+#endif
+
 	if (retval < 0) {
 		printk(KERN_ERR "%s: Error, fail to read device on i2c bus\n",
 			__func__);
@@ -888,9 +917,15 @@ static irqreturn_t cyttsp_irq(int irq, void *handle)
 	/* send no events if there were no previous touches */
 	/* and no new touches */
 	if ((trc.prv_tch == CY_NTCH) && ((trc.cur_tch == CY_NTCH) ||
-				(trc.cur_tch > CY_NUM_MT_TCH_ID)))
+				(trc.cur_tch > CY_NUM_MT_TCH_ID))) {
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+		if (xy_data.tt_undef[0] & 0x03)
+			atomic_set(&ts->ntch_count, CY_MAX_NTCH);
+		else
+			atomic_dec(&ts->ntch_count);
+#endif
 		goto exit_xy_worker;
-
+	}
 	DBG(printk(KERN_INFO "%s: prev=%d  curr=%d\n", __func__,
 		   trc.prv_tch, trc.cur_tch);)
 
@@ -1136,7 +1171,6 @@ static int cyttsp_load_bl_regs(struct cyttsp *ts)
 
 	retval =  ttsp_read_block_data(ts, CY_REG_BASE,
 				sizeof(ts->bl_data), &(ts->bl_data));
-
 	if (retval < 0) {
 		DBG(printk(KERN_INFO "%s: Failed reading block data, err:%d\n",
 			__func__, retval);)
@@ -1309,6 +1343,13 @@ static int cyttsp_set_bl_mode(struct cyttsp *ts)
 	} while (ts->bl_data.bl_status != 0x10 &&
 		ts->bl_data.bl_status != 0x11 &&
 		tries++ < 100);
+
+	ts->appid = ((u16)ts->bl_data.appid_hi << 8) | ts->bl_data.appid_lo;
+	ts->appver = ((u16)ts->bl_data.appver_hi << 8) | ts->bl_data.appver_lo;
+	ts->ttspid = ((u16)ts->bl_data.ttspver_hi << 8) |
+			ts->bl_data.ttspver_lo;
+	ts->cid = ((u32)ts->bl_data.cid_0 << 16) |
+			((u32)ts->bl_data.cid_1 << 8) | ts->bl_data.cid_2;
 	if (tries >= 100)
 		printk(KERN_ERR "%s: bootlodader not ready, status 0x%02x\n",
 			__func__, ts->bl_data.bl_status);
@@ -1419,6 +1460,51 @@ bypass:
 	return retval;
 }
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+
+static int cyttsp_check_esd(struct cyttsp *ts, u8 tt_mode)
+{
+	int retval;
+	u8 bootloader_flag = (tt_mode >> 4) & 0x1;
+	if ((bootloader_flag == 0) && (atomic_read(&ts->ntch_count) > 0)) {
+		retval = 0;
+	} else {
+		atomic_set(&ts->ntch_count, CY_MAX_NTCH);
+		dev_info(ts->pdev, "%s: Reset touch device for ESD\n",
+				__func__);
+
+		retval = cyttsp_power_on(ts);
+		if (retval < 0)
+			dev_err(ts->pdev, "%s: Error, power on failed!\n",
+				__func__);
+
+		retval = 1;
+	}
+	return retval;
+}
+
+static void cyttsp_reset_worker(struct work_struct *work)
+{
+	struct cyttsp *ts = container_of(to_delayed_work(work),
+						struct cyttsp, work);
+	s32 retval;
+	struct cyttsp_mode xy_mode;
+
+	retval = ttsp_read_block_data(ts, CY_REG_BASE, 2, &xy_mode);
+	if (retval < 0)
+		goto reserve_next;
+
+	retval = cyttsp_check_esd(ts, xy_mode.tt_mode);
+	if (retval == 0)
+		dev_dbg(ts->pdev, "%s: ESD check, not BL mode\n", __func__);
+	else
+		dev_dbg(ts->pdev, "%s: BL mode, Reset OK\n", __func__);
+
+reserve_next:
+	schedule_delayed_work(&ts->work, ESD_CHECK_INTERVAL);
+}
+#endif
+
 static int cyttsp_resume(struct cyttsp *ts)
 {
 	int retval = 0;
@@ -1463,6 +1549,8 @@ static int cyttsp_suspend(struct cyttsp *ts)
 			CY_REG_BASE, sizeof(sleep_mode), &sleep_mode);
 		if (!(retval < 0))
 			ts->platform_data->power_state = CY_SLEEP_STATE;
+		else
+			ts->platform_data->power_state = CY_UNSURE_STATE;
 	}
 	DBG(printk(KERN_INFO"%s: Sleep Power state is %s\n", __func__,
 		(ts->platform_data->power_state == CY_ACTIVE_STATE) ?
@@ -1482,6 +1570,10 @@ static void cyttsp_ts_early_suspend(struct early_suspend *h)
 	if (!ts->fw_loader_mode) {
 		disable_irq_nosync(ts->irq);
 		ts->suspended = 1;
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+		dev_dbg(ts->pdev, "%s: stop ESD check\n", __func__);
+		cancel_delayed_work_sync(&ts->work);
+#endif
 		cyttsp_suspend(ts);
 	}
 	UNLOCK(ts->mutex);
@@ -1498,6 +1590,10 @@ static void cyttsp_ts_late_resume(struct early_suspend *h)
 		if (cyttsp_resume(ts) < 0)
 			printk(KERN_ERR "%s: Error, cyttsp_resume.\n",
 				__func__);
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+		dev_dbg(ts->pdev, "%s: start ESD check\n", __func__);
+		schedule_delayed_work(&ts->work, ESD_CHECK_INTERVAL);
+#endif
 		enable_irq(ts->irq);
 	}
 	UNLOCK(ts->mutex);
@@ -1553,7 +1649,7 @@ exit:
 static struct bin_attribute cyttsp_firmware = {
 	.attr = {
 		.name = "firmware",
-		.mode = 0644,
+		.mode = 0666,
 	},
 	.size = 128,
 	.read = firmware_read,
@@ -1571,6 +1667,35 @@ static ssize_t attr_fwloader_show(struct device *dev,
 		ts->sysinfo_data.cid[0], ts->sysinfo_data.cid[1],
 		ts->sysinfo_data.cid[2]);
 }
+
+static ssize_t attr_appid_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cyttsp *ts = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%04X\n", ts->appid);
+}
+
+static ssize_t attr_appver_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cyttsp *ts = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%04X\n", ts->appver);
+}
+
+static ssize_t attr_ttspid_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cyttsp *ts = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%04X\n", ts->ttspid);
+}
+
+static ssize_t attr_custid_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct cyttsp *ts = dev_get_drvdata(dev);
+	return sprintf(buf, "0x%06X\n", ts->cid);
+}
+
 
 static ssize_t attr_fwloader_store(struct device *dev,
 				struct device_attribute *attr,
@@ -1592,7 +1717,11 @@ static ssize_t attr_fwloader_store(struct device *dev,
 		if (ts->suspended) {
 			cyttsp_resume(ts);
 		} else {
-			disable_irq_nosync(ts->irq);
+			disable_irq(ts->irq);
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+			dev_dbg(ts->pdev, "%s: stop ESD check\n", __func__);
+			cancel_delayed_work_sync(&ts->work);
+#endif
 		}
 		ts->suspended = 0;
 		if (sysfs_create_bin_file(&dev->kobj, &cyttsp_firmware))
@@ -1614,6 +1743,11 @@ static ssize_t attr_fwloader_store(struct device *dev,
 		cyttsp_set_sysinfo_mode(ts);
 		cyttsp_set_operational_mode(ts);
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+		dev_dbg(ts->pdev, "%s: start ESD check\n", __func__);
+		schedule_delayed_work(&ts->work, ESD_CHECK_INTERVAL);
+#endif
+
 		enable_irq(ts->irq);
 		ts->fw_loader_mode = 0;
 		printk(KERN_INFO "%s: FW loader finished.\n", __func__);
@@ -1622,8 +1756,37 @@ static ssize_t attr_fwloader_store(struct device *dev,
 	return  ret == size ? ret : -EINVAL;
 }
 
-static struct device_attribute fwloader =
-	__ATTR(fwloader, 0644, attr_fwloader_show, attr_fwloader_store);
+static struct device_attribute attributes[] = {
+	__ATTR(fwloader, 0644, attr_fwloader_show, attr_fwloader_store),
+	__ATTR(appid, 0444, attr_appid_show, NULL),
+	__ATTR(appver, 0444, attr_appver_show, NULL),
+	__ATTR(ttspid, 0444, attr_ttspid_show, NULL),
+	__ATTR(custid, 0444, attr_custid_show, NULL),
+};
+
+static int add_sysfs_interfaces(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(attributes); i++)
+		if (device_create_file(dev, attributes + i))
+			goto undo;
+	return 0;
+undo:
+	for (; i >= 0 ; i--)
+		device_remove_file(dev, attributes + i);
+	dev_err(dev, "%s: failed to create sysfs interface\n", __func__);
+	return -ENODEV;
+}
+
+static void remove_sysfs_interfaces(struct device *dev)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(attributes); i++)
+		device_remove_file(dev, attributes + i);
+}
+
 
 void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops, struct device *pdev)
 {
@@ -1734,6 +1897,12 @@ void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops, struct device *pdev)
 	DBG(printk(KERN_INFO "%s: Registered input device %s\n",
 		   __func__, input_device->name);)
 
+#ifdef CONFIG_TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+	dev_info(ts->pdev, "%s: Enable ESD check\n", __func__);
+	INIT_DELAYED_WORK(&ts->work, cyttsp_reset_worker);
+	atomic_set(&ts->ntch_count, CY_MAX_NTCH);
+#endif
+
 	retval = request_threaded_irq(ts->irq, NULL, cyttsp_irq,
 				      IRQF_TRIGGER_FALLING |
 				      IRQF_DISABLED,
@@ -1752,17 +1921,15 @@ void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops, struct device *pdev)
 	ts->early_suspend.resume = cyttsp_ts_late_resume;
 	register_early_suspend(&ts->early_suspend);
 #endif
-	retval = device_create_file(pdev, &fwloader);
-	if (retval) {
-		printk(KERN_ERR "%s: Error, could not create attribute\n",
-			__func__);
-		goto device_create_error;
-	}
+	retval = add_sysfs_interfaces(pdev);
+	if (retval)
+		goto attr_create_error;
+
 	dev_set_drvdata(pdev, ts);
 	printk(KERN_INFO "%s: Successful.\n", __func__);
 	return ts;
 
-device_create_error:
+attr_create_error:
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&ts->early_suspend);
 #endif
@@ -1788,6 +1955,7 @@ void cyttsp_core_release(void *handle)
 	struct cyttsp *ts = handle;
 
 	DBG(printk(KERN_INFO"%s: Enter\n", __func__);)
+	remove_sysfs_interfaces(ts->pdev);
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	unregister_early_suspend(&ts->early_suspend);
 #endif
