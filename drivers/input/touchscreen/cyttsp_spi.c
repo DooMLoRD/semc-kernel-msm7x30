@@ -39,6 +39,7 @@
 #define CY_SPI_RD_OP      0x01
 #define CY_SPI_CMD_BYTES  4
 #define CY_SPI_SYNC_BYTES 2
+#define CY_SPI_SYNC_BYTE  2
 #define CY_SPI_SYNC_ACK1  0x62 /* from protocol v.2 */
 #define CY_SPI_SYNC_ACK2  0x9D /* from protocol v.2 */
 #define CY_SPI_SYNC_NACK  0x69
@@ -151,7 +152,13 @@ static int cyttsp_spi_xfer_(u8 op, struct cyttsp_spi *ts_spi,
 			}
 		}
 		DBG(printk(KERN_INFO "%s: byte sync error\n", __func__);)
-		retval = 1;
+		retval = -EAGAIN;
+	} else {
+		if ((rd_buf[CY_SPI_SYNC_BYTE] == CY_SPI_SYNC_ACK1) &&
+			(rd_buf[CY_SPI_SYNC_BYTE+1] == CY_SPI_SYNC_ACK2))
+			retval = 0;
+		else
+			retval = -EAGAIN;
 	}
 	return retval;
 }
@@ -160,21 +167,16 @@ static int cyttsp_spi_xfer(u8 op, struct cyttsp_spi *ts,
 			    u8 reg, u8 *buf, int length)
 {
 	int tries;
-	int retval;
+	int rc;
 	DBG(printk(KERN_INFO "%s: Enter\n", __func__);)
 
-	if (op == CY_SPI_RD_OP) {
-		for (tries = CY_NUM_RETRY; tries; tries--) {
-			retval = cyttsp_spi_xfer_(op, ts, reg, buf, length);
-			if (retval == 0)
-				break;
-			else
-				msleep(10);
-		}
-	} else {
-		retval = cyttsp_spi_xfer_(op, ts, reg, buf, length);
+	for (tries = 0; tries < CY_NUM_RETRY; tries++) {
+		rc = cyttsp_spi_xfer_(op, ts, reg, buf, length);
+		if (!rc || rc != -EAGAIN)
+			break;
 	}
-	return retval;
+
+	return rc;
 }
 
 static s32 ttsp_spi_read_block_data(void *handle, u8 addr,
@@ -189,12 +191,6 @@ static s32 ttsp_spi_read_block_data(void *handle, u8 addr,
 	if (retval < 0)
 		printk(KERN_ERR "%s: ttsp_spi_read_block_data failed\n",
 			__func__);
-
-	/* Do not print the above error if the data sync bytes were not found.
-	   This is a normal condition for the bootloader loader startup and need
-	   to retry until data sync bytes are found. */
-	if (retval > 0)
-		retval = -1;	/* now signal fail; so retry can be done */
 
 	return retval;
 }
@@ -212,10 +208,7 @@ static s32 ttsp_spi_write_block_data(void *handle, u8 addr,
 		printk(KERN_ERR "%s: ttsp_spi_write_block_data failed\n",
 			__func__);
 
-	if (retval == -EIO)
-		return 0;
-	else
-		return retval;
+	return retval;
 }
 
 static s32 ttsp_spi_tch_ext(void *handle, void *values)

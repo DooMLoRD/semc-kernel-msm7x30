@@ -301,6 +301,13 @@ config TOUCHSCREEN_SYNAPTICS_I2C_RMI
 	help
 	  This enables support for Synaptics RMI over I2C based touchscreens.
 
+config TOUCHSCREEN_CLEARPAD3000_I2C
+        tristate "Synaptics ClearPad 3000 I2C"
+	depends on I2C
+	default n
+        help
+          Say Y here to enable Synaptics ClearPad 3000 I2C touchscreen.
+
 config TOUCHSCREEN_TOUCHRIGHT
 	tristate "Touchright serial touchscreen"
 	select SERIO
@@ -693,5 +700,12 @@ config TOUCHSCREEN_CYTTSP_KEY
 	depends on TOUCHSCREEN_CYTTSP_CORE
 	help
 	  Activated for Cypress TTSP touchkey function
+
+config TOUCHSCREEN_CYTTSP_ESD_RECOVERY
+	default n
+	bool "Cypress TTSP touch ESD"
+	depends on TOUCHSCREEN_CYTTSP_CORE
+	help
+	  Activated for Cypress TTSP touch ESD protect function
 
 endif
