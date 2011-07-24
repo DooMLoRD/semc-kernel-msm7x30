@@ -42,7 +42,6 @@
 #include <linux/mutex.h>
 #include <linux/remote_spinlock.h>
 #include <linux/pm_qos_params.h>
-#include <linux/timer.h>
 
 #define SPI_DRV_NAME                  "spi_qsd"
 #if defined(CONFIG_SPI_QSD) || defined(CONFIG_SPI_QSD_MODULE)
@@ -314,9 +313,6 @@ struct msm_spi {
 	bool                     use_rlock;
 	remote_mutex_t           r_lock;
 	uint32_t                 pm_lat;
-	spinlock_t		 clk_lock;
-	int			 clk_count;
-	struct timer_list	 clk_disable_timer;
 };
 
 /* Forward declaration */
@@ -1215,41 +1211,6 @@ transfer_end:
 	msm_spi_set_state(dd, SPI_OP_STATE_RESET);
 }
 
-static void msm_spi_clk_enable(struct msm_spi *dd)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&dd->clk_lock, flags);
-	if (!dd->clk_count) {
-		clk_enable(dd->clk);
-		if (dd->pclk)
-			clk_enable(dd->pclk);
-		dd->clk_count++;
-	}
-	spin_unlock_irqrestore(&dd->clk_lock, flags);
-
-	mod_timer(&dd->clk_disable_timer, jiffies + HZ);
-}
-
-static void msm_spi_clk_disable(struct msm_spi *dd)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&dd->clk_lock, flags);
-	if (dd->clk_count) {
-		clk_disable(dd->clk);
-		if (dd->pclk)
-			clk_disable(dd->pclk);
-		dd->clk_count--;
-	}
-	spin_unlock_irqrestore(&dd->clk_lock, flags);
-}
-
-static void msm_spi_clk_disable_timer(unsigned long data)
-{
-	msm_spi_clk_disable((struct msm_spi *) data);
-}
-
 /* workqueue - pull messages from queue & process */
 static void msm_spi_workq(struct work_struct *work)
 {
@@ -1266,7 +1227,9 @@ static void msm_spi_workq(struct work_struct *work)
 	if (dd->use_rlock)
 		remote_mutex_lock(&dd->r_lock);
 
-	msm_spi_clk_enable(dd);
+	clk_enable(dd->clk);
+	if (dd->pclk)
+		clk_enable(dd->pclk);
 	msm_spi_enable_irqs(dd);
 
 	if (!msm_spi_is_valid_state(dd)) {
@@ -1298,6 +1261,9 @@ static void msm_spi_workq(struct work_struct *work)
 	spin_unlock_irqrestore(&dd->queue_lock, flags);
 
 	msm_spi_disable_irqs(dd);
+	clk_disable(dd->clk);
+	if (dd->pclk)
+		clk_disable(dd->pclk);
 
 	if (dd->use_rlock)
 		remote_mutex_unlock(&dd->r_lock);
@@ -1432,7 +1398,9 @@ static int msm_spi_setup(struct spi_device *spi)
 	if (dd->use_rlock)
 		remote_mutex_lock(&dd->r_lock);
 
-	msm_spi_clk_enable(dd);
+	clk_enable(dd->clk);
+	if (dd->pclk)
+		clk_enable(dd->pclk);
 
 	spi_ioc = readl(dd->base + SPI_IO_CONTROL);
 	mask = SPI_IO_C_CS_N_POLARITY_0 << spi->chip_select;
@@ -1458,7 +1426,9 @@ static int msm_spi_setup(struct spi_device *spi)
 		spi_config |= SPI_CFG_INPUT_FIRST;
 	writel(spi_config, dd->base + SPI_CONFIG);
 
-	msm_spi_clk_disable(dd);
+	clk_disable(dd->clk);
+	if (dd->pclk)
+		clk_disable(dd->pclk);
 
 	if (dd->use_rlock)
 		remote_mutex_unlock(&dd->r_lock);
@@ -1844,11 +1814,6 @@ static int __init msm_spi_probe(struct platform_device *pdev)
 		}
 	}
 
-	spin_lock_init(&dd->clk_lock);
-	init_timer(&dd->clk_disable_timer);
-	dd->clk_disable_timer.data = (unsigned long) dd;
-	dd->clk_disable_timer.function = msm_spi_clk_disable_timer;
-
 	spin_lock_init(&dd->queue_lock);
 	mutex_init(&dd->core_lock);
 	INIT_LIST_HEAD(&dd->queue);
@@ -2067,9 +2032,6 @@ static int msm_spi_suspend(struct platform_device *pdev, pm_message_t state)
 
 	/* Wait for transactions to end, or time out */
 	wait_event_interruptible(dd->continue_suspend, !dd->transfer_pending);
-
-	del_timer_sync(&dd->clk_disable_timer);
-	msm_spi_clk_disable(dd);
 
 suspend_exit:
 	return 0;

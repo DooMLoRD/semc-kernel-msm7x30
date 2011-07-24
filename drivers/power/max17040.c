@@ -323,6 +323,8 @@ static void max17040_worker(struct work_struct *work)
 
 	struct max17040_data *this;
 	struct delayed_work *dwork;
+	int delay;
+
 	dwork = container_of(work, struct delayed_work, work);
 	this = container_of(dwork, struct max17040_data, work);
 
@@ -330,7 +332,11 @@ static void max17040_worker(struct work_struct *work)
 
 	dev_info(&this->clientp->dev, "batt:%3d%%, %d mV\n", this->curr_soc,
 	       this->curr_mv);
-	queue_delayed_work(this->wq, &this->work, HZ*60);
+
+	/* increase sample rate when closing in on 0 soc */
+	delay = HZ * (this->curr_soc < 5 ? 5 : 60);
+
+	queue_delayed_work(this->wq, &this->work, delay);
 }
 
 static int max17040_get_supplier_data(struct device *dev, void *data)

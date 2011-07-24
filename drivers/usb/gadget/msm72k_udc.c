@@ -1454,9 +1454,6 @@ static void usb_prepare(struct usb_info *ui)
 	INIT_DELAYED_WORK(&ui->chg_det, usb_chg_detect);
 	INIT_DELAYED_WORK(&ui->chg_stop, usb_chg_stop);
 	INIT_DELAYED_WORK(&ui->rw_work, usb_do_remote_wakeup);
-	if (ui->pdata && ui->pdata->is_phy_status_timer_on)
-		INIT_WORK(&ui->phy_status_check, usb_phy_stuck_recover);
-
 #ifdef CONFIG_SUPPORT_ALIEN_USB_CHARGER
 	INIT_DELAYED_WORK(&ui->chg_type_work, usb_check_chg_type_work);
 	INIT_WORK(&ui->chg_type_stop_delayed_work,
@@ -1662,10 +1659,7 @@ static void usb_do_work(struct work_struct *w)
 				if (ui->driver) {
 					dev_dbg(&ui->pdev->dev,
 						"usb: notify offline\n");
-					if (ui->driver->offline)
-						ui->driver->offline(&ui->gadget);
-					else
-						ui->driver->disconnect(&ui->gadget);
+					ui->driver->disconnect(&ui->gadget);
 				}
 
 				switch_set_state(&ui->sdev, 0);

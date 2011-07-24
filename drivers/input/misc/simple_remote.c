@@ -32,6 +32,7 @@
 #include <linux/ctype.h>
 #include <linux/timer.h>
 #include <linux/kernel.h>
+#include <linux/spinlock.h>
 
 #include <linux/simple_remote.h>
 
@@ -150,7 +151,6 @@ struct simple_remote_driver {
 
 	atomic_t detection_in_progress;
 	atomic_t detect_cycle;
-	atomic_t initialized;
 
 	u8 pressed_button;
 	u8 nodetect_cycles;
@@ -733,13 +733,9 @@ static irqreturn_t simple_remote_button_irq_handler(int irq, void *data)
 
 	struct simple_remote_driver *jack = data;
 
-	if (atomic_read(&jack->initialized)) {
-		dev_dbg(jack->dev, "Received a Button interrupt\n");
-		schedule_work(&jack->btn_det_work);
-	} else {
-		dev_dbg(jack->dev, "Received button IRQ before initialized "
-			"system. Discarding\n");
-	}
+	dev_dbg(jack->dev, "Received a Button interrupt\n");
+
+	schedule_work(&jack->btn_det_work);
 
 	return IRQ_HANDLED;
 }
@@ -770,6 +766,8 @@ static int simple_remote_probe(struct platform_device *pdev)
 	int size;
 	void *v;
 	struct simple_remote_driver *jack;
+	unsigned long flags;
+	spinlock_t boot_lock = SPIN_LOCK_UNLOCKED;
 
 	dev_info(&pdev->dev, "**** Registering (headset) driver\n");
 
@@ -781,7 +779,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 	mutex_init(&jack->simple_remote_mutex);
 
 	if (!pdev->dev.platform_data)
-		goto err_switch_dev_register;
+		goto err_system_init;
 
 
 	size = sizeof(*jack->interface) / sizeof(void *);
@@ -789,7 +787,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 
 	for (; size > 0; size--)
 		if (v++ == NULL)
-			goto err_switch_dev_register;
+			goto err_system_init;
 
 	jack->interface = pdev->dev.platform_data;
 	jack->dev = &pdev->dev;
@@ -825,7 +823,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(jack->dev,
 			"create_sysfs_interfaces for input failed\n");
-		goto err_switch_dev_register;
+		goto err_allocate_input_dev;
 	}
 
 	if (initialize_hardware(jack))
@@ -852,21 +850,13 @@ static int simple_remote_probe(struct platform_device *pdev)
 	input_set_drvdata(jack->indev, jack);
 	platform_set_drvdata(pdev, jack);
 
-	ret = input_register_device(jack->indev);
-	if (ret) {
-		dev_err(jack->dev, "input_register_device for input device "
-			"failed\n");
-		input_free_device(jack->indev);
-		goto err_register_input_dev;
-	}
-
 	/* Create input device for application key events. */
 	jack->indev_appkey = input_allocate_device();
 	if (!jack->indev_appkey) {
 		ret = -ENOMEM;
 		dev_err(jack->dev, "Failed to allocate application key input "
 			"device\n");
-		goto err_allocate_input_appkey_dev;
+		goto err_allocate_appkey_dev;
 	}
 
 	jack->indev_appkey->name = SIMPLE_REMOTE_APPKEY_NAME;
@@ -878,26 +868,48 @@ static int simple_remote_probe(struct platform_device *pdev)
 
 	input_set_drvdata(jack->indev_appkey, jack);
 
+	/* Need to lock the registration of input devices with a spinlock.
+	 * This will make sure that no interrupts are received while we are
+	 * registering these input devices. If one is opened before the other
+	 * is allocated, an interrupt may cause a NULL pointer access in the
+	 * function report_button_id(). Event though we disable interrupts here
+	 * this is generally faster than adding if's to the function above. */
+	spin_lock_irqsave(&boot_lock, flags);
+	ret = input_register_device(jack->indev);
+	if (ret) {
+		dev_err(jack->dev,
+			"input_register_device for input device failed");
+		ret = -ENODEV;
+		spin_unlock_irqrestore(&boot_lock, flags);
+		goto err_register_input_dev;
+	}
+
 	ret = input_register_device(jack->indev_appkey);
 	if (ret) {
-		dev_err(jack->dev, "input_register_device for application key "
-				"input device failed\n");
-		goto err_register_input_appkey_dev;
+		dev_err(jack->dev,
+			"input_register_device for application key failed");
+		ret = -ENODEV;
+		input_unregister_device(jack->indev);
+		input_free_device(jack->indev_appkey);
+		spin_unlock_irqrestore(&boot_lock, flags);
+		goto err_allocate_input_dev;
 	}
+	spin_unlock_irqrestore(&boot_lock, flags);
 
 	dev_info(jack->dev, "***** Successfully registered\n");
 
-	atomic_set(&jack->initialized, 1);
-
 	return ret;
 
-err_register_input_appkey_dev:
-	input_free_device(jack->indev_appkey);
-err_allocate_input_appkey_dev:
-	input_unregister_device(jack->indev);
 err_register_input_dev:
+	input_free_device(jack->indev_appkey);
+err_allocate_appkey_dev:
+	input_free_device(jack->indev);
 err_allocate_input_dev:
+	switch_dev_unregister(&jack->swdev);
 err_switch_dev_register:
+	del_timer(&jack->plug_det_timer);
+err_system_init:
+	mutex_destroy(&jack->simple_remote_mutex);
 	dev_err(&pdev->dev, "***** Failed to initialize\n");
 	kzfree(jack);
 
@@ -919,6 +931,7 @@ static int simple_remote_remove(struct platform_device *pdev)
 	input_unregister_device(jack->indev_appkey);
 	input_unregister_device(jack->indev);
 	switch_dev_unregister(&jack->swdev);
+	mutex_destroy(&jack->simple_remote_mutex);
 	kzfree(jack);
 
 	return 0;

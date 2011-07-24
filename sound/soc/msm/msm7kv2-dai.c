@@ -3,6 +3,7 @@
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
  * Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2010 Sony Ericsson Mobile Communications AB
  *
  * Derived from msm-pcm.c and msm7201.c.
  *
@@ -81,7 +82,7 @@ int msm_pcm_probe(struct platform_device *devptr)
 
 	struct snd_soc_device *socdev = platform_get_drvdata(devptr);
 
-	printk(KERN_ERR "msm_soc: create pcms\n");
+	printk(KERN_INFO "msm_soc: create pcms\n");
 	codec = kzalloc(sizeof(struct snd_soc_codec), GFP_KERNEL);
 	if (codec == NULL)
 		return -ENOMEM;

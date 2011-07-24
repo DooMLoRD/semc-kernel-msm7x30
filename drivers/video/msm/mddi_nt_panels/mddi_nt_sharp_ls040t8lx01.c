@@ -78,7 +78,7 @@ static const struct novatek_reg_set novatek_init_regs_rev_c[] = {
 	{ 0x68C0, 0x0008 },
 	{ 0xF380, 0x00CC },
 	{ 0x3500, 0x0000 },	/* Set TE ON */
-	{ 0x4400, 0x0001 },
+	{ 0x4400, 0x0000 },
 	{ 0x4401, 0x0000 },	/* Set Tear line */
 	{ 0x3600, 0x00C0 },
 	{0, 0}
@@ -127,7 +127,7 @@ static const struct novatek_reg_set novatek_init_regs_rev_d[] = {
 
 static const struct novatek_reg_set novatek_setup_regs_rev_d[] = {
 	{ 0x3500, 0x0000 }, /* Set TE ON */
-	{ 0x4400, 0x0001 }, /* Set TE scanline */
+	{ 0x4400, 0x0000 }, /* Set TE scanline */
 	{ 0x4401, 0x0000 }, /* Set TE scanline */
 	{ 0x2A00, 0x0000 }, /* SET_HORIZONTAL_ADDRESS */
 	{ 0x2A01, 0x0000 }, /* SET_HORIZONTAL_ADDRESS */

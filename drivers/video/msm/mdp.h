@@ -682,12 +682,5 @@ void mdp_vsync_clk_disable(void);
 void mdp_vsync_clk_enable(void);
 #endif
 
-#ifdef CONFIG_DEBUG_FS
-int mdp_debugfs_init(void);
-#endif
-
-
-
-
 void mdp_dma_s_update(struct msm_fb_data_type *mfd);
 #endif /* MDP_H */

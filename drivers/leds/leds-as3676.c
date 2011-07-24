@@ -890,11 +890,15 @@ static ssize_t as3676_als_value_show(struct kobject *kobj,
 static void as3676_als_set_adc_ctrl(struct as3676_record *rd)
 {
 	u8 val;
-
+	int status;
 	/* Sometimes AS3676 has increased 200uA current consumption in standby
 	 * and need to handle it by sw. */
 	reg_set(rd, AS3676_ADC_CTRL, 0x80);
-	i2c_smbus_read_i2c_block_data(rd->client, AS3676_ADC_CTRL, 1, &val);
+	status = i2c_smbus_read_i2c_block_data(rd->client, AS3676_ADC_CTRL,
+					       1, &val);
+	if (status < 0)
+		dev_err(&rd->client->dev, "%s:I2C read error:%d\n",
+			 __func__, status);
 }
 
 static void as3676_als_set_enable(struct as3676_record *rd, u8 enable)

@@ -123,17 +123,29 @@
 #if defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
 #include <linux/mddi_hitachi_r61529_hvga.h>
 #endif
+#if defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
+#include <linux/mddi_sii_r61529_hvga.h>
+#endif
 #ifdef CONFIG_SIMPLE_REMOTE_PLATFORM
 #include <mach/simple_remote_msm7x30_pf.h>
 #endif
 #ifdef CONFIG_FPC_CONNECTOR_TEST
 #include <linux/fpc_connector_test.h>
 #endif
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD3000_I2C
+#include <linux/i2c/clearpad3000.h>
+#endif
+#ifdef CONFIG_SEMC_MOGAMI_FELICA_SUPPORT
+#include <mach/semc_mogami_felica.h>
+#endif
 #include <linux/battery_chargalg.h>
 
 #define BQ24185_GPIO_IRQ		(31)
 #define CYPRESS_TOUCH_GPIO_RESET	(40)
 #define CYPRESS_TOUCH_GPIO_IRQ		(42)
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD3000_I2C
+#define SYNAPTICS_TOUCH_GPIO_IRQ	(42)
+#endif
 #define CYPRESS_TOUCH_GPIO_SPI_CS	(46)
 #ifdef CONFIG_INPUT_BMA150
 #define BMA150_GPIO			(51)
@@ -149,7 +161,8 @@
 #define NOVATEK_GPIO_RESET		(157)
 
 #if defined(CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) || \
-	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
+	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) || \
+	defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
 #define GPIO_MSM_MDDI_XRES		(157)
 #endif
 
@@ -158,7 +171,7 @@
 #define MSM_RAM_CONSOLE_SIZE    (128 * SZ_1K)
 #endif
 
-#define MSM_PMEM_SF_SIZE	0x1300000
+#define MSM_PMEM_SF_SIZE	0x500000
 #ifdef CONFIG_FB_MSM_HDMI_SII9024A_PANEL
 #define MSM_FB_SIZE             0x530000
 #else
@@ -167,9 +180,7 @@
 #define MSM_GPU_PHYS_SIZE       SZ_2M
 #define MSM_PMEM_CAMERA_SIZE    0x3200000
 #define MSM_PMEM_ADSP_SIZE      0x1800000
-#if 0
 #define MSM_PMEM_SWIQI_SIZE     0xE00000
-#endif
 #define PMEM_KERNEL_EBI1_SIZE   0x600000
 #define MSM_PMEM_AUDIO_SIZE     0x200000
 
@@ -195,6 +206,24 @@
 #endif
 #ifdef CONFIG_USB_MSM_OTG_72K
 #include <mach/msm72k_otg.h>
+#endif
+
+#ifdef CONFIG_SEMC_ONESEG_TUNER_PM
+#include <linux/oneseg_tunerpm.h>
+#define D_ONESEG_DEVICE_PORT_RESET	38 /* tuner HW reset */
+#define D_ONESEG_DEVICE_PORT_POWER	39 /* tuner power suply reset */
+#endif /* CONFIG_SEMC_ONESEG_TUNER_PM */
+
+#ifdef CONFIG_SEMC_MOGAMI_IRDA
+#include <mach/semc_msm_irda.h>
+#define PM_GPIO_IRDA_M_RX   36
+#define PM_GPIO_IRDA_M_TX   35
+#define PM_GPIO_IRDA_RX1    32
+#define PM_GPIO_IRDA_RX2    33
+#define PM_GPIO_IRDA_RX3    34
+#define PM_GPIO_IRDA_TX1    20
+#define PM_GPIO_IRDA_TX2    21
+#define PM_GPIO_IRDA_TX3    22
 #endif
 
 /* Platform specific HW-ID GPIO mask */
@@ -227,7 +256,7 @@ static int vreg_helper_on(const char *pzName, unsigned mv)
 		return rc;
 	}
 
-	printk(KERN_ERR "Enabled VREG \"%s\" at %u mV\n", pzName, mv);
+	printk(KERN_INFO "Enabled VREG \"%s\" at %u mV\n", pzName, mv);
 	return rc;
 }
 
@@ -249,7 +278,7 @@ static void vreg_helper_off(const char *pzName)
 		return;
 	}
 
-	printk(KERN_ERR "Disabled VREG \"%s\"\n", pzName);
+	printk(KERN_INFO "Disabled VREG \"%s\"\n", pzName);
 }
 
 static ssize_t hw_id_get_mask(struct class *class, char *buf)
@@ -441,6 +470,131 @@ static struct platform_device semc_rpc_handset_device = {
 		.platform_data = &semc_rpc_hs_data,
 	},
 };
+
+#ifdef CONFIG_SEMC_MOGAMI_IRDA
+static struct msm_gpio irda_uart[] = {
+	{ GPIO_CFG(85, 3, GPIO_CFG_INPUT,  GPIO_CFG_NO_PULL,
+			GPIO_CFG_2MA), "UART2DM_Rx" },
+	{ GPIO_CFG(87, 3, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL,
+			GPIO_CFG_2MA), "UART2DM_Tx" },
+};
+struct pm8058_gpio pm_irda_m_tx = {
+	.direction      = PM_GPIO_DIR_IN,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_S3,
+	.out_strength   = PM_GPIO_STRENGTH_NO,
+	.function       = PM_GPIO_FUNC_NORMAL,
+};
+struct pm8058_gpio pm_irda_tx = {
+	.direction      = PM_GPIO_DIR_OUT,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_L2,
+	.out_strength   = PM_GPIO_STRENGTH_MED,
+	.function       = PM_GPIO_FUNC_2,
+};
+struct pm8058_gpio pm_irda_m_rx = {
+	.direction      = PM_GPIO_DIR_OUT,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_S3,
+	.out_strength   = PM_GPIO_STRENGTH_MED,
+	.function       = PM_GPIO_FUNC_2,
+};
+struct pm8058_gpio pm_irda_rx = {
+	.direction      = PM_GPIO_DIR_IN,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_L2,
+	.out_strength   = PM_GPIO_STRENGTH_NO,
+	.function       = PM_GPIO_FUNC_NORMAL,
+};
+struct irda_pm_gpio_config {
+	int                gpio;
+	struct pm8058_gpio *param;
+};
+static struct irda_pm_gpio_config irda_pm_gpio[] = {
+	{PM_GPIO_IRDA_TX1, &pm_irda_tx},
+	{PM_GPIO_IRDA_TX3, &pm_irda_tx},
+	{PM_GPIO_IRDA_RX1, &pm_irda_rx},
+	{PM_GPIO_IRDA_RX3, &pm_irda_rx},
+	{PM_GPIO_IRDA_M_TX, &pm_irda_m_tx},
+	{PM_GPIO_IRDA_M_RX, &pm_irda_m_rx},
+};
+
+#define MSM_UART2DM_PHYS      0xA3200000
+#define PMIC_GPIO_IRDA        38
+struct pm8058_gpio g39irda_hig = {
+	.direction      = PM_GPIO_DIR_OUT,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.output_value   = 1,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_L7,
+	.out_strength   = PM_GPIO_STRENGTH_MED,
+	.function       = PM_GPIO_FUNC_NORMAL,
+};
+struct pm8058_gpio g39irda_low = {
+	.direction      = PM_GPIO_DIR_OUT,
+	.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
+	.output_value   = 0,
+	.pull           = PM_GPIO_PULL_NO,
+	.vin_sel        = PM_GPIO_VIN_L7,
+	.out_strength   = PM_GPIO_STRENGTH_MED,
+	.function       = PM_GPIO_FUNC_NORMAL,
+};
+static int semc_mogami_irda_init(void);
+struct irda_platform_data irda_data = {
+	.gpio_pow       = PMIC_GPIO_IRDA,
+	.gpio_pwcfg_low = &g39irda_low,
+	.gpio_pwcfg_hig = &g39irda_hig,
+	.paddr_uartdm   = MSM_UART2DM_PHYS,
+	.irq_uartdm     = INT_UART2DM_IRQ,
+	.chan_uartdm_tx = DMOV_HSUART2_TX_CHAN,
+	.crci_uartdm_tx = DMOV_HSUART2_TX_CRCI,
+	.chan_uartdm_rx = DMOV_HSUART2_RX_CHAN,
+	.crci_uartdm_rx = DMOV_HSUART2_RX_CRCI,
+	.clk_str        = "uartdm_clk",
+	.clk_dev        = &msm_device_uart_dm2.dev,
+	.gpio_init      = semc_mogami_irda_init,
+};
+static struct platform_device irda_mogami_device = {
+	.name   = "semc-msm-irda",
+	.id = -1,
+	.dev = {
+		.platform_data = &irda_data,
+	},
+};
+
+static int semc_mogami_irda_init(void)
+{
+	unsigned int ret;
+	int i, len;
+
+	ret = 0;
+
+	/* Configure PM8058 GPIO*/
+	len = sizeof(irda_pm_gpio)/sizeof(struct irda_pm_gpio_config);
+	for (i = 0; i < len; i++) {
+		ret = pm8058_gpio_config(irda_pm_gpio[i].gpio,
+						irda_pm_gpio[i].param);
+		if (ret) {
+			pr_err("%s PM_GPIO_IRDA[%d] config failed\n",
+				 __func__, i);
+			return ret;
+		}
+	}
+
+	/* Configure MSM UART2DM GPIO*/
+	ret = msm_gpios_request_enable(irda_uart, ARRAY_SIZE(irda_uart));
+	if (ret) {
+		pr_err("%s enable uart2dm gpios failed\n", __func__);
+		return ret;
+	}
+
+	return 0;
+}
+#endif
 
 static int pm8058_gpios_init(void)
 {
@@ -1727,6 +1881,12 @@ static const struct panel_id *novatek_panels[] = {
 	&novatek_panel_id_hitachi_dx09d09vm_type1,
 	&novatek_panel_id_hitachi_dx09d09vm,
 #endif
+#ifdef CONFIG_MDDI_NOVATEK_PANEL_SHARP_LS033T3LX01
+	&novatek_panel_id_sharp_ls033t3lx01,
+#endif
+#ifdef CONFIG_MDDI_NOVATEK_PANEL_TMD_LT033MDV1000
+	&novatek_panel_id_tmd_lt033mdv1000,
+#endif
 	NULL,
 };
 
@@ -1960,7 +2120,8 @@ static struct sii9024_platform_data sii9024_platform_data = {
 #endif /* CONFIG_FB_MSM_HDMI_SII9024A_PANEL */
 
 #if defined(CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) || \
-	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
+	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) || \
+	defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
 /*  Generic LCD Regulators On function for SEMC mogami displays */
 static void semc_mogami_lcd_regulators_on(void)
 {
@@ -1986,7 +2147,8 @@ static void semc_mogami_lcd_power_on(u8 delay1, u8 delay2, u8 delay3)
 	mdelay(delay3);
 }
 #endif  /* (CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) ||
-	(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) */
+	(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) ||
+	(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)*/
 
 #if defined(CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD)
 /* Display resolutin */
@@ -2099,6 +2261,71 @@ static struct platform_device mddi_hitachi_hvga_display_device = {
 	}
 };
 #endif   /* CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD  */
+
+#if defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
+/* Display resolution */
+#define SII_HVGA_PANEL_XRES 320
+#define SII_HVGA_PANEL_YRES 480
+
+static void sii_hvga_lcd_power_on(void)
+{
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
+	semc_mogami_lcd_regulators_on();
+	msleep(1);           /* spec > 310us*/
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
+	msleep(11); /* spec > 10 */
+}
+
+static void sii_hvga_lcd_power_off(void)
+{
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
+	msleep(121); /* spec > 120ms */
+	vreg_helper_off("gp7");  /* L8 */
+	vreg_helper_off("gp6");  /* L15 */
+}
+
+static void sii_hvga_lcd_exit_deep_standby(void)
+{
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 0);
+	msleep(2);   /* spec: > 1ms */
+	gpio_set_value(GPIO_MSM_MDDI_XRES, 1);
+	msleep(6);  /* spec: > 5 ms */
+}
+
+static struct msm_fb_panel_data sii_hvga_panel_data = {
+	.panel_info = {
+		.xres = SII_HVGA_PANEL_XRES,
+		.yres = SII_HVGA_PANEL_YRES,
+		.pdest = DISPLAY_1,
+		.type = MDDI_PANEL,
+		.wait_cycle = 0,
+		.bpp = 24,
+		.clk_rate = 192000000,
+		.clk_min =  190000000,
+		.clk_max =  200000000,
+		.fb_num = 2,
+		.bl_max = 4,
+		.bl_min = 1,
+	},
+};
+
+static struct sii_hvga_platform_data sii_hvga_panel_ext = {
+	.power_on = sii_hvga_lcd_power_on,
+	.power_off = sii_hvga_lcd_power_off,
+	.exit_deep_standby = sii_hvga_lcd_exit_deep_standby,
+	.dbc_on = 1,
+	.dbc_mode = DBC_MODE_VIDEO,
+	.panel_data = &sii_hvga_panel_data,
+};
+
+static struct platform_device mddi_sii_hvga_display_device = {
+	.name = MDDI_SII_R61529_HVGA_NAME,
+	.id = -1,
+	.dev = {
+		.platform_data = &sii_hvga_panel_ext,
+	}
+};
+#endif   /* CONFIG_FB_MSM_MDDI_SII_HVGA_LCD  */
 
 #if defined(CONFIG_TOUCHSCREEN_CY8CTMA300_SPI) || \
 	defined(CONFIG_TOUCHSCREEN_CYTTSP_SPI)
@@ -2331,6 +2558,48 @@ static struct cyttsp_platform_data cyttsp_data = {
 };
 #endif /* CONFIG_TOUCHSCREEN_CYTTSP_SPI */
 
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD3000_I2C
+static struct msm_gpio clearpad3000_gpio_config_data[] = {
+	{ GPIO_CFG(SYNAPTICS_TOUCH_GPIO_IRQ, 0, GPIO_CFG_INPUT,
+		   GPIO_CFG_PULL_UP, GPIO_CFG_2MA), "clearpad3000_irq" },
+};
+
+static int clearpad3000_gpio_configure(int enable)
+{
+	int rc = 0;
+
+	if (enable)
+		rc = msm_gpios_request_enable(clearpad3000_gpio_config_data,
+				ARRAY_SIZE(clearpad3000_gpio_config_data));
+	else
+		msm_gpios_disable_free(clearpad3000_gpio_config_data,
+				ARRAY_SIZE(clearpad3000_gpio_config_data));
+	return rc;
+}
+
+static struct synaptics_button synaptics_menu_key = {
+	.type = EV_KEY,
+	.code = KEY_MENU,
+};
+
+static struct synaptics_button synaptics_back_key = {
+	.type = EV_KEY,
+	.code = KEY_BACK,
+};
+
+static struct synaptics_funcarea cleanpad3000_funcarea_array[] = {
+	{ 0, 0, 479, 853, SYN_FUNCAREA_POINTER, NULL },
+	{ 0, 864, 159, 921, SYN_FUNCAREA_BUTTON, &synaptics_back_key },
+	{ 320, 864, 479, 921, SYN_FUNCAREA_BUTTON, &synaptics_menu_key },
+	{ .func = SYN_FUNCAREA_END }
+};
+
+static struct clearpad3000_platform_data clearpad3000_data = {
+	.funcarea = cleanpad3000_funcarea_array,
+	.gpio_configure = clearpad3000_gpio_configure,
+};
+#endif
+
 /* Driver(s) to be notified upon change in battery data */
 static char *semc_bdata_supplied_to[] = {
 	BQ27520_NAME,
@@ -2378,7 +2647,6 @@ struct bq27520_platform_data bq27520_platform_data = {
 	.polling_lower_capacity = FULLY_CHARGED_AND_RECHARGE_CAP,
 	.polling_upper_capacity = 100,
 	.udatap = bq27520_block_table,
-	.ocv_issue_capacity_threshold = 20,
 #ifdef CONFIG_BATTERY_CHARGALG
 	.disable_algorithm = battery_chargalg_disable,
 #endif
@@ -2408,9 +2676,9 @@ struct bq24185_platform_data bq24185_platform_data = {
 
 static struct battery_regulation_vs_temperature id_bat_reg = {
 	/* Cold, Normal, Warm, Overheat */
-	{5,	45,	55,	127},	/* temp */
-	{0,	4200,	4000,	0},	/* volt */
-	{0,	1050,	400,	0},	/* curr */
+	{5, 45,		55,	127},	/* temp */
+	{0, 4200,	4000,	0},	/* volt */
+	{0, USHORT_MAX,	400,	0},	/* curr */
 };
 
 /* Driver(s) to be notified upon change in algorithm */
@@ -2426,8 +2694,7 @@ static struct battery_chargalg_platform_data battery_chargalg_platform_data = {
 	.id_bat_reg = &id_bat_reg,
 	.ext_eoc_recharge_enable = 1,
 	.temp_hysteresis_design = 3,
-	.battery_capacity_mah = &battery_capacity_mah,
-	.ambient_temp = &battery_chargalg_platform_ambient_temp,
+	.ddata = &device_data,
 	.batt_volt_psy_name = BQ27520_NAME,
 	.batt_curr_psy_name = BQ27520_NAME,
 
@@ -2617,8 +2884,8 @@ static struct apds9702_platform_data apds9702_pdata = {
 	.ctl_reg = {
 		.trg   = 1,
 		.pwr   = 1,
-		.burst = 7,
-		.frq   = 3,
+		.burst = 15,
+		.frq   = 2,
 		.dur   = 2,
 		.th    = 15,
 		.rfilt = 0,
@@ -2651,6 +2918,13 @@ static struct akm8975_platform_data akm8975_platform_data = {
 };
 
 static struct i2c_board_info msm_i2c_board_info[] = {
+#ifdef CONFIG_TOUCHSCREEN_CLEARPAD3000_I2C
+	{
+		I2C_BOARD_INFO("clearpad3000", 0x58 >> 1),
+		.irq = MSM_GPIO_TO_INT(SYNAPTICS_TOUCH_GPIO_IRQ),
+		.platform_data	= &clearpad3000_data,
+	},
+#endif
 	{
 		I2C_BOARD_INFO("as3676", 0x80 >> 1),
 		.platform_data = &as3676_platform_data,
@@ -3095,21 +3369,17 @@ static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 	.cached = 0,
 };
 
-#if 0
 static struct android_pmem_platform_data android_pmem_adsp_cached_pdata = {
 	.name = "pmem_adsp_cached",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
 	.cached = 1,
 };
-#endif
 
-#if 0
 static struct android_pmem_platform_data android_pmem_swiqi_pdata = {
 	.name = "pmem_swiqi",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
 	.cached = 1,
 };
-#endif
 
 static struct android_pmem_platform_data android_pmem_camera_pdata = {
 	.name = "pmem_camera",
@@ -3135,21 +3405,16 @@ static struct platform_device android_pmem_adsp_device = {
 	.dev = {.platform_data = &android_pmem_adsp_pdata},
 };
 
-#if 0
 static struct platform_device android_pmem_adsp_cached_device = {
 	.name = "android_pmem",
 	.id = 5,
 	.dev = {.platform_data = &android_pmem_adsp_cached_pdata},
 };
-#endif
-
-#if 0
 static struct platform_device android_pmem_swiqi_device = {
 	.name = "android_pmem",
 	.id = 6,
 	.dev = {.platform_data = &android_pmem_swiqi_pdata},
 };
-#endif
 
 static struct platform_device android_pmem_camera_device = {
 	.name = "android_pmem",
@@ -3268,6 +3533,22 @@ static struct msm_panel_common_pdata mdp_pdata = {
 	.mdp_core_clk_rate = 122880000,
 };
 
+#ifdef CONFIG_SEMC_ONESEG_TUNER_PM
+struct oneseg_tunerpm_platform_data oneseg_tunerpm_data = {
+	.gpio_rst = D_ONESEG_DEVICE_PORT_RESET,
+	.gpio_pwr = D_ONESEG_DEVICE_PORT_POWER,
+};
+
+
+struct platform_device oneseg_tunerpm_device = {
+	.name = D_ONESEG_TUNERPM_DRIVER_NAME,
+	.id = 0,
+	.dev  = {
+		.platform_data = &oneseg_tunerpm_data,
+	},
+};
+#endif
+
 #ifdef CONFIG_BT
 static uint32_t bt_config_on_gpios[] = {
 	GPIO_CFG(134, 1, GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_4MA),
@@ -3383,6 +3664,8 @@ int simple_remote_pf_initialize_gpio(struct simple_remote_platform_data *data)
 				goto out_hs_det_read;
 		}
 	}
+
+	return err;
 
 out_hs_mode_switch:
 	gpio_free(data->headset_mode_switch_pin);
@@ -3507,12 +3790,8 @@ static struct platform_device *devices[] __initdata = {
 #endif /* CONFIG_FB_MSM_HDMI_SII9024A_PANEL */
 	&android_pmem_kernel_ebi1_device,
 	&android_pmem_adsp_device,
-#if 0
 	&android_pmem_adsp_cached_device,
-#endif
-#if 0
 	&android_pmem_swiqi_device,
-#endif
 	&android_pmem_camera_device,
 	&android_pmem_audio_device,
 	&msm_device_i2c,
@@ -3569,11 +3848,23 @@ static struct platform_device *devices[] __initdata = {
 #if defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
 	&mddi_hitachi_hvga_display_device,
 #endif
+#if defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
+	&mddi_sii_hvga_display_device,
+#endif
 #ifdef CONFIG_PMIC_TIME
 	&pmic_time_device,
 #endif /* CONFIG_PMIC_TIME */
 #ifdef CONFIG_FPC_CONNECTOR_TEST
 	&fpc_test_device,
+#endif
+#ifdef CONFIG_SEMC_ONESEG_TUNER_PM
+	&oneseg_tunerpm_device,
+#endif
+#ifdef CONFIG_SEMC_MOGAMI_FELICA_SUPPORT
+	&semc_mogami_felica_device,
+#endif
+#ifdef CONFIG_SEMC_MOGAMI_IRDA
+	&irda_mogami_device,
 #endif
 };
 
@@ -4017,19 +4308,18 @@ static void msm7x30_init_uart3(void)
 #if defined(CONFIG_TSIF) || defined(CONFIG_TSIF_MODULE)
 
 #define TSIF_B_SYNC      GPIO_CFG(37, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
 #define TSIF_B_DATA      GPIO_CFG(36, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
 #define TSIF_B_EN        GPIO_CFG(35, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
 #define TSIF_B_CLK       GPIO_CFG(34, 1, GPIO_CFG_INPUT, \
-				GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA)
+				GPIO_CFG_NO_PULL, GPIO_CFG_2MA)
 
 static const struct msm_gpio tsif_gpios[] = {
 	{ .gpio_cfg = TSIF_B_CLK,  .label =  "tsif_clk", },
 	{ .gpio_cfg = TSIF_B_EN,   .label =  "tsif_en", },
 	{ .gpio_cfg = TSIF_B_DATA, .label =  "tsif_data", },
-	{ .gpio_cfg = TSIF_B_SYNC, .label =  "tsif_sync", },
 };
 
 static struct msm_tsif_platform_data tsif_platform_data = {
@@ -4176,7 +4466,8 @@ static void __init msm7x30_init(void)
 	msm_device_ssbi7.dev.platform_data = &msm_i2c_ssbi7_pdata;
 
 #if defined(CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) || \
-	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD)
+	defined(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) || \
+	defined(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD)
 	semc_mogami_lcd_power_on(11, 2, 21);
 #endif
 }
@@ -4213,17 +4504,6 @@ static void __init pmem_adsp_size_setup(char **p)
 
 __early_param("pmem_adsp_size=", pmem_adsp_size_setup);
 
-#if 0
-static unsigned pmem_adsp_cached_size = MSM_PMEM_ADSP_SIZE;
-static void __init pmem_adsp_cached_size_setup(char **p)
-{
-	pmem_adsp_cached_size = memparse(*p, p);
-}
-
-__early_param("pmem_adsp_cached_size=", pmem_adsp_cached_size_setup);
-#endif
-
-#if 0
 static unsigned pmem_swiqi_size = MSM_PMEM_SWIQI_SIZE;
 static void __init pmem_swiqi_size_setup(char **p)
 {
@@ -4231,7 +4511,6 @@ static void __init pmem_swiqi_size_setup(char **p)
 }
 
 __early_param("pmem_swiqi_size=", pmem_swiqi_size_setup);
-#endif
 
 static unsigned pmem_camera_size = MSM_PMEM_CAMERA_SIZE;
 static void __init pmem_camera_size_setup(char **p)
@@ -4295,20 +4574,13 @@ static void __init msm7x30_allocate_memory_regions(void)
 		android_pmem_adsp_pdata.size = size;
 		pr_info("allocating %lu bytes at %p (%lx physical) for adsp "
 			"pmem arena\n", size, addr, __pa(addr));
-	}
 
-#if 0
-	size = pmem_adsp_size;
-
-	if (size) {
 		android_pmem_adsp_cached_pdata.start = __pa(addr);
 		android_pmem_adsp_cached_pdata.size = size;
 		pr_info("setting %lu bytes at %p (%lx physical) for adsp cached "
 			"pmem arena\n", size, addr, __pa(addr));
 	}
-#endif
 
-#if 0
 	size = pmem_swiqi_size;
 
 	if (size) {
@@ -4318,7 +4590,6 @@ static void __init msm7x30_allocate_memory_regions(void)
 		pr_info("allocating %lu bytes at %p (%lx physical) for swiqi "
 			"pmem arena\n", size, addr, __pa(addr));
 	}
-#endif
 
 	size = pmem_camera_size;
 	if (size) {

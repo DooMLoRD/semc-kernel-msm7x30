@@ -599,7 +599,12 @@ static void msm_otg_start_host(struct otg_transceiver *xceiv, int on)
 		/* Some targets, e.g. ST1.5, use GPIO to choose b/w connector */
 		if (on && pdata->setup_gpio)
 			pdata->setup_gpio(USB_SWITCH_HOST);
+		/* prevent idle power collapse in host mode */
+		if (on)
+			otg_pm_qos_update_latency(dev, 1);
 		dev->start_host(xceiv->host, on);
+		if (!on)
+			otg_pm_qos_update_latency(dev, 0);
 		if (!on && pdata->setup_gpio)
 			pdata->setup_gpio(USB_SWITCH_DISABLE);
 	}
@@ -611,7 +616,6 @@ static int msm_otg_suspend(struct msm_otg *dev)
 	int vbus = 0;
 	unsigned ret;
 	enum chg_type chg_type = atomic_read(&dev->chg_type);
-	unsigned long flags;
 
 	disable_irq(dev->irq);
 	if (atomic_read(&dev->in_lpm))
@@ -665,14 +669,8 @@ static int msm_otg_suspend(struct msm_otg *dev)
 	while (!is_phy_clk_disabled()) {
 		if (time_after(jiffies, timeout)) {
 			pr_err("%s: Unable to suspend phy\n", __func__);
-			/*
-			 * Start otg state machine in default state upon
-			 * phy suspend failure
-			 */
-			spin_lock_irqsave(&dev->lock, flags);
-			dev->otg.state = OTG_STATE_UNDEFINED;
-			spin_unlock_irqrestore(&dev->lock, flags);
-			queue_work(dev->wq, &dev->sm_work);
+			/* Reset both phy and link */
+			otg_reset(&dev->otg, 1);
 			goto out;
 		}
 		msleep(1);
@@ -960,9 +958,7 @@ static int usbdev_notify(struct notifier_block *self,
 			if (udev->actconfig)
 				set_aca_bmaxpower(dev,
 					udev->actconfig->desc.bMaxPower * 2);
-				goto do_work;
-			}
-			if (udev->portnum == udev->bus->otg_port)
+			else if (udev->portnum == udev->bus->otg_port)
 				set_aca_bmaxpower(dev, USB_IB_UNCFG);
 			else
 				set_aca_bmaxpower(dev, 100);
@@ -979,7 +975,7 @@ static int usbdev_notify(struct notifier_block *self,
 		work = 0;
 		break;
 	}
-do_work:
+
 	if (work) {
 		wake_lock(&dev->wlock);
 		queue_work(dev->wq, &dev->sm_work);
