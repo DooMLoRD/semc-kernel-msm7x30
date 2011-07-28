@@ -698,7 +698,11 @@ static struct msm_queue_cmd *__msm_control(struct msm_sync *sync,
 	rc = wait_event_interruptible_timeout(
 			queue->wait,
 			!list_empty_careful(&queue->list),
+#if defined(CONFIG_SEMC_CAMERA_MODULE) || defined(CONFIG_SEMC_SUB_CAMERA_MODULE)
+			msecs_to_jiffies(timeout));
+#else
 			timeout);
+#endif
 	CDBG("Waiting over for config status \n");
 	if (list_empty_careful(&queue->list)) {
 		if (!rc)
@@ -797,7 +801,11 @@ static int msm_control(struct msm_control_device *ctrl_pmsm,
 
 	qcmd_resp = __msm_control(sync,
 				  &ctrl_pmsm->ctrl_q,
+#if defined(CONFIG_SEMC_CAMERA_MODULE) || defined(CONFIG_SEMC_SUB_CAMERA_MODULE)
+				  &qcmd, udata.timeout_ms);
+#else
 				  &qcmd, MAX_SCHEDULE_TIMEOUT);
+#endif
 
 	if (!qcmd_resp || IS_ERR(qcmd_resp)) {
 		/* Do not free qcmd_resp here.  If the config thread read it,
@@ -2787,10 +2795,9 @@ static int msm_open_control(struct inode *inode, struct file *filep)
 		return -ENOMEM;
 
 	rc = msm_open_common(inode, filep, 0);
-	if (rc < 0) {
-		kfree(ctrl_pmsm);
+	if (rc < 0)
 		return rc;
-	}
+
 	ctrl_pmsm->pmsm = filep->private_data;
 	filep->private_data = ctrl_pmsm;
 

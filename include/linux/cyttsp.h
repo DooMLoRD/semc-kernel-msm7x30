@@ -56,7 +56,7 @@ enum cyttsp_gen {
 #define CY_ACT_DIST_DFLT 8
 #define CY_ACT_DIST CY_ACT_DIST_DFLT
 /* max num retries to read touch data */
-#define CY_NUM_RETRY 4
+#define CY_NUM_RETRY 100
 
 enum cyttsp_gest {
 	CY_GEST_GRP_NONE = 0,
@@ -71,6 +71,7 @@ enum cyttsp_powerstate {
 	CY_ACTIVE_STATE,
 	CY_LOW_PWR_STATE,
 	CY_SLEEP_STATE,
+	CY_UNSURE_STATE,
 };
 
 struct cyttsp_platform_data {

@@ -1,4 +1,5 @@
-/* Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+ * Copyright (C) 2010 Sony Ericsson Mobile Communications AB
  *
  * All source code in this file is licensed under the following license except
  * where indicated.
@@ -340,7 +341,7 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 				set_freq = dev_info->sample_rate;
 
 
-			MM_ERR("device freq =%d\n", set_freq);
+			MM_INFO("device freq =%d\n", set_freq);
 			rc = dev_info->dev_ops.set_freq(dev_info, set_freq);
 			if (rc < 0) {
 				MM_ERR("device freq failed!\n");
@@ -356,9 +357,6 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 			dev_info->opened = 1;
 			broadcast_event(AUDDEV_EVT_DEV_RDY, route_cfg.dev_id,
 							SESSION_IGNORE);
-			/* Event to notify client for device info */
-			broadcast_event(AUDDEV_EVT_DEVICE_INFO,
-					route_cfg.dev_id, SESSION_IGNORE);
 		}
 	} else {
 		if (dev_info->opened) {
@@ -466,15 +464,10 @@ static int msm_route_put(struct snd_kcontrol *kcontrol,
 			dev_info->sessions &= ~(session_mask);
 		} else {
 			dev_info->sessions = dev_info->sessions | session_mask;
-			if (dev_info->opened) {
+			if (dev_info->opened)
 				broadcast_event(AUDDEV_EVT_DEV_RDY,
 							route_cfg.dev_id,
 							session_mask);
-				/* Event to notify client for device info */
-				broadcast_event(AUDDEV_EVT_DEVICE_INFO,
-							route_cfg.dev_id,
-							session_mask);
-			}
 		}
 	} else {
 		rc = msm_snddev_set_enc(session_id, dev_info->copp_id, set);
@@ -508,15 +501,10 @@ static int msm_route_put(struct snd_kcontrol *kcontrol,
 							SESSION_IGNORE);
 				}
 			}
-			if (dev_info->opened) {
+			if (dev_info->opened)
 				broadcast_event(AUDDEV_EVT_DEV_RDY,
 							route_cfg.dev_id,
 							session_mask);
-				/* Event to notify client for device info */
-				broadcast_event(AUDDEV_EVT_DEVICE_INFO,
-							route_cfg.dev_id,
-							session_mask);
-			}
 		}
 	}
 

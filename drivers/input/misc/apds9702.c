@@ -91,6 +91,9 @@ static int apds9702_do_sensing(struct apds9702data *data, int enable)
 		err = apds9702_write_byte(data->client, 0, 0);
 		pdata->hw_config(0);
 		data->active = 0;
+
+		input_report_abs(data->input_dev, ABS_DISTANCE, 255);
+		input_sync(data->input_dev);
 	}
 	if (err)
 		dev_err(&data->client->dev, "%s. I2C write error = %d\n",

@@ -109,7 +109,7 @@
 #define AKM8975_GPIO				92
 #define NOVATEK_GPIO_RESET			157
 
-#define MSM_PMEM_SF_SIZE	0x1300000
+#define MSM_PMEM_SF_SIZE	0x500000
 #define MSM_FB_SIZE		0x500000
 #define MSM_GPU_PHYS_SIZE       SZ_2M
 #define MSM_PMEM_ADSP_SIZE      0x1800000
@@ -183,7 +183,7 @@ static int vreg_helper_on(const char *pzName, unsigned mv)
 		return rc;
 	}
 
-	printk(KERN_ERR "Enabled VREG \"%s\" at %u mV\n", pzName, mv);
+	printk(KERN_INFO "Enabled VREG \"%s\" at %u mV\n", pzName, mv);
 	return rc;
 }
 
@@ -205,7 +205,7 @@ static void vreg_helper_off(const char *pzName)
 		return;
 	}
 
-	printk(KERN_ERR "Disabled VREG \"%s\"\n", pzName);
+	printk(KERN_INFO "Disabled VREG \"%s\"\n", pzName);
 }
 
 static int pm8058_gpios_init(void)
@@ -1381,23 +1381,6 @@ struct novatek_i2c_pdata novatek_i2c_pdata = {
 	.panels = novatek_panels,
 };
 
-static struct as3676_als_config as3676_als_config = {
-	.gain = AS3676_GAIN_1,
-	.filter_up = AS3676_FILTER_1HZ,
-	.filter_down = AS3676_FILTER_1HZ,
-	.source = AS3676_ALS_SOURCE_GPIO2,
-	.curve = {
-		[AS3676_AMB_GROUP_1] = {
-			.y0 = 49,
-			.y3 = 255,
-			.k1 = 71,
-			.k2 = 54,
-			.x1 =  1,
-			.x2 = 33,
-		},
-	},
-};
-
 static struct as3676_platform_led as3676_pdata_leds[] = {
 	{
 		.name = "lcd-backlight",
@@ -1430,7 +1413,6 @@ static struct as3676_platform_led as3676_pdata_leds[] = {
 static struct as3676_platform_data as3676_platform_data = {
 	.leds = as3676_pdata_leds,
 	.num_leds = ARRAY_SIZE(as3676_pdata_leds),
-	.als_config = &as3676_als_config,
 	.als_connected = 1,
 	.dls_connected = 1,
 };
@@ -2365,16 +2347,13 @@ static struct platform_device semc_rpc_handset_device = {
 #ifdef CONFIG_SIMPLE_REMOTE_PLATFORM
 #define PLUG_DET_ENA_PIN 80
 #define PLUG_DET_READ_PIN 26
-#define MODE_SWITCH_PIN -1
 
 int simple_remote_pf_initialize_gpio(struct simple_remote_platform_data *data)
 {
 	int err = 0;
-	int i;
 
 	if (!data || -1 == data->headset_detect_enable_pin) {
-		printk(KERN_ERR
-		       "*** %s - Error: Invalid inparameter (GPIO Pins)."
+		printk(KERN_ERR "*** %s - Error: Invalid inparameter (GPIO Pins)."
 		       " Aborting!\n", __func__);
 		return -EIO;
 	}
@@ -2415,44 +2394,7 @@ int simple_remote_pf_initialize_gpio(struct simple_remote_platform_data *data)
 	else
 		data->invert_plug_det = 0;
 
-	if (0 < data->headset_mode_switch_pin) {
-		printk(KERN_INFO "%s - This device supports HS Mode switch\n",
-		       __func__);
-		err = gpio_request(data->headset_mode_switch_pin,
-				   "Simple_remote_headset_mode_switch");
-		if (err) {
-			printk(KERN_CRIT
-			       "%s - Error %d - Request hs-mode_switch pin",
-			       __func__, err);
-			goto out_hs_det_read;
-		}
-
-		err = gpio_direction_output(data->headset_mode_switch_pin, 0);
-		if (err) {
-			printk(KERN_CRIT
-			       "%s - Error %d - Set hs-mode_switch pin as "
-			       "input\n", __func__, err);
-			goto out_hs_mode_switch;
-		}
-	}
-
-	for (i = 0; i < data->num_regs; i++) {
-		data->regs[i].reg = vreg_get(NULL, data->regs[i].name);
-		if (IS_ERR(data->regs[i].reg)) {
-			printk(KERN_ERR "%s - Failed to find regulator %s\n",
-			       __func__, data->regs[i].name);
-			err = PTR_ERR(data->regs[i].reg);
-			if (0 <= data->headset_mode_switch_pin)
-				goto out_hs_mode_switch;
-			else
-				goto out_hs_det_read;
-		}
-	}
-
 	return err;
-
-out_hs_mode_switch:
-	gpio_free(data->headset_mode_switch_pin);
 
 out_hs_det_read:
 	gpio_free(data->headset_detect_read_pin);
@@ -2470,27 +2412,11 @@ void simple_remote_pf_deinitialize_gpio(
 	gpio_free(data->headset_detect_enable_pin);
 }
 
-static struct simple_remote_platform_regulators regs[] =  {
-	{
-		.name = "ncp",
-	},
-	{
-		.name = "s3",
-	},
-	{
-		.name = "s2",
-	},
-};
-
 static struct simple_remote_platform_data simple_remote_pf_data = {
 	.headset_detect_enable_pin = PLUG_DET_ENA_PIN,
 	.headset_detect_read_pin = PLUG_DET_READ_PIN,
-	.headset_mode_switch_pin = MODE_SWITCH_PIN,
 	.initialize = &simple_remote_pf_initialize_gpio,
 	.deinitialize = &simple_remote_pf_deinitialize_gpio,
-
-	.regs = regs,
-	.num_regs = ARRAY_SIZE(regs),
 
 	.controller = PM_HSED_CONTROLLER_1,
 };

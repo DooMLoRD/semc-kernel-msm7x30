@@ -2457,6 +2457,7 @@ static int msmfb_overlay_play_enable(struct fb_info *info, unsigned long *argp)
 
 static int msmfb_dtv_lcdc_enable(struct fb_info *info, unsigned long *argp)
 {
+#ifdef CONFIG_FB_MSM_DTV
 	int	ret, enable;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 
@@ -2469,6 +2470,9 @@ static int msmfb_dtv_lcdc_enable(struct fb_info *info, unsigned long *argp)
 
 	ret = mdp4_dtv_lcdc_enable(mfd->pdev, enable);
 	return ret;
+#else
+	return -ENODEV;
+#endif
 }
 #endif
 

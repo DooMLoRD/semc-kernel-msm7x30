@@ -37,7 +37,14 @@
 #include <mach/qdsp5v2/marimba_profile_anzu.h>
 #elif defined(CONFIG_MACH_SEMC_HALLON)
 #include <mach/qdsp5v2/marimba_profile_hallon.h>
+#elif defined(CONFIG_MACH_SEMC_AKANE)
+#include <mach/qdsp5v2/marimba_profile_akane.h>
+#elif defined(CONFIG_MACH_SEMC_AZUSA)
+#include <mach/qdsp5v2/marimba_profile_azusa.h>
+#else
+#include <mach/qdsp5v2/marimba_profile_mogami.h>
 #endif
+
 /***************************************************************************\
 				Platform Device Profiles
 \***************************************************************************/

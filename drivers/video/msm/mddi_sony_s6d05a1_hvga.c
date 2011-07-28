@@ -165,6 +165,7 @@ static DEVICE_ATTR(debug, 0644, show_debug_ctrl, store_debug_ctrl);
 enum mddi_sony_lcd_state {
 	LCD_STATE_OFF,
 	LCD_STATE_POWER_ON,
+	LCD_STATE_DISPLAY_OFF,
 	LCD_STATE_ON,
 	LCD_STATE_SLEEP
 };
@@ -366,6 +367,9 @@ static void sony_lcd_window_adjust(uint16 x1, uint16 x2, uint16 y1, uint16 y2)
 		write_client_reg_nbr(0x2C, 0, 0, 0, 0, 1);
 #endif
 
+	/* Workaround: 0x3Ch at start of column bug */
+	write_client_reg_nbr(0x3C, 0, 0, 0, 0, 1);
+
 	mutex_unlock(&mddi_mutex);
 }
 
@@ -373,12 +377,18 @@ static void sony_lcd_enter_sleep(void)
 {
 	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
 
-	/* Display off */
-	write_client_reg_nbr(0x28, 0, 0, 0, 0, 1);
-	mddi_wait(50); /* >50 ms */
 	/* Sleep in */
 	write_client_reg_nbr(0x10, 0, 0, 0, 0, 1);
 	mddi_wait(120); /* >120 ms */
+}
+
+static void sony_lcd_display_off(void)
+{
+	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
+
+	/* Display off */
+	write_client_reg_nbr(0x28, 0, 0, 0, 0, 1);
+	mddi_wait(50); /* >50 ms */
 }
 
 
@@ -389,6 +399,11 @@ static void sony_lcd_exit_sleep(void)
 	/* Sleep out */
 	write_client_reg_nbr(0x11, 0x00000000, 0, 0, 0, 1);
 	mddi_wait(120); /* >120 ms */
+}
+
+static void sony_lcd_display_on(void)
+{
+	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
 
 	/* Display on */
 	write_client_reg_nbr(0x29, 0x00000000, 0, 0, 0, 1);
@@ -447,7 +462,7 @@ static void sony_power_off(struct platform_device *pdev)
 	}
 }
 
-static int mddi_sony_lcd_on(struct platform_device *pdev)
+static int mddi_sony_ic_on_panel_off(struct platform_device *pdev)
 {
 	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
 
@@ -463,6 +478,37 @@ static int mddi_sony_lcd_on(struct platform_device *pdev)
 			sony_lcd_driver_init(pdev);
 			sony_lcd_exit_sleep();
 			sony_lcd_dbc_on();
+			lcd_state = LCD_STATE_DISPLAY_OFF;
+			break;
+
+		case LCD_STATE_SLEEP:
+			sony_lcd_exit_deepstandby(pdev);
+			sony_lcd_driver_init(pdev);
+			sony_lcd_exit_sleep();
+			sony_lcd_dbc_on();
+			lcd_state = LCD_STATE_DISPLAY_OFF;
+			break;
+
+		default:
+			break;
+		}
+	}
+	mutex_unlock(&mddi_mutex);
+	return 0;
+}
+
+static int mddi_sony_ic_on_panel_on(struct platform_device *pdev)
+{
+	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
+
+	mutex_lock(&mddi_mutex);
+	if (power_ctrl) {
+		switch (lcd_state) {
+		case LCD_STATE_POWER_ON:
+			sony_lcd_driver_init(pdev);
+			sony_lcd_exit_sleep();
+			sony_lcd_dbc_on();
+			sony_lcd_display_on();
 			lcd_state = LCD_STATE_ON;
 			break;
 
@@ -471,6 +517,12 @@ static int mddi_sony_lcd_on(struct platform_device *pdev)
 			sony_lcd_driver_init(pdev);
 			sony_lcd_exit_sleep();
 			sony_lcd_dbc_on();
+			sony_lcd_display_on();
+			lcd_state = LCD_STATE_ON;
+			break;
+
+		case LCD_STATE_DISPLAY_OFF:
+			sony_lcd_display_on();
 			lcd_state = LCD_STATE_ON;
 			break;
 
@@ -486,7 +538,7 @@ static int mddi_sony_lcd_on(struct platform_device *pdev)
 }
 
 
-static int mddi_sony_lcd_off(struct platform_device *pdev)
+static int mddi_sony_ic_off_panel_off(struct platform_device *pdev)
 {
 	MDDI_DEBUG(LEVEL_TRACE, "%s [%d]\n", __func__, lcd_state);
 
@@ -499,6 +551,7 @@ static int mddi_sony_lcd_off(struct platform_device *pdev)
 			break;
 
 		case LCD_STATE_ON:
+			sony_lcd_display_off();
 			sony_lcd_dbc_off();
 			sony_lcd_enter_sleep();
 			sony_lcd_enter_deepstandby();
@@ -508,6 +561,13 @@ static int mddi_sony_lcd_off(struct platform_device *pdev)
 		case LCD_STATE_SLEEP:
 			sony_power_off(pdev);
 			lcd_state = LCD_STATE_OFF;
+			break;
+
+		case LCD_STATE_DISPLAY_OFF:
+			sony_lcd_dbc_off();
+			sony_lcd_enter_sleep();
+			sony_lcd_enter_deepstandby();
+			lcd_state = LCD_STATE_SLEEP;
 			break;
 
 		case LCD_STATE_OFF:
@@ -703,9 +763,11 @@ static ssize_t store_power_ctrl(struct device *dev_p,
 		sony_lcd_driver_init(pdev);
 		sony_lcd_exit_sleep();
 		sony_lcd_dbc_on();
+		sony_lcd_display_on();
 		lcd_state = LCD_STATE_ON;
 	} else {
 		power_ctrl = POWER_OFF;
+		sony_lcd_display_off();
 		sony_lcd_dbc_off();
 		sony_lcd_enter_sleep();
 		sony_power_off(pdev);
@@ -862,10 +924,11 @@ static int mddi_sony_lcd_probe(struct platform_device *pdev)
 		lcd_state = LCD_STATE_POWER_ON;
 		power_ctrl = POWER_ON;
 
-		panel_data->on  = mddi_sony_lcd_on;
-		panel_data->off = mddi_sony_lcd_off;
-		panel_ext->window_adjust =
-						sony_lcd_window_adjust;
+		panel_data->on  = mddi_sony_ic_on_panel_off;
+		panel_data->controller_on_panel_on = mddi_sony_ic_on_panel_on;
+		panel_data->off = mddi_sony_ic_off_panel_off;
+		panel_data->power_on_panel_at_pan = 0;
+		panel_data->window_adjust = sony_lcd_window_adjust;
 
 		pdev->dev.platform_data = &sony_hvga_panel_data;
 		/* adds mfd on driver_data */

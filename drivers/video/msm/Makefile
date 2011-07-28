@@ -8,7 +8,7 @@ obj-y += mdp.o
 
 ifeq ($(CONFIG_FB_MSM_MDP40),y)
 obj-y += mdp4_util.o
-obj-$(CONFIG_DEBUG_FS) += mdp_debugfs.o
+obj-$(CONFIG_DEBUG_FS) += mdp4_debugfs.o
 else
 obj-y += mdp_hw_init.o
 obj-y += mdp_ppp.o
@@ -81,6 +81,7 @@ obj-y += mddi_toshiba_wvga.o
 obj-y += mddi_novatek_fwvga.o
 obj-y += mddi_sony_s6d05a1_hvga.o
 obj-y += mddi_hitachi_r61529_hvga.o
+obj-y += mddi_sii_r61529_hvga.o
 obj-y += mddi_sharp.o
 obj-y += mddi_orise.o
 obj-y += mddi_quickvx.o
@@ -93,6 +94,7 @@ obj-$(CONFIG_FB_MSM_MDDI_TOSHIBA_WVGA) += mddi_toshiba_wvga.o
 obj-$(CONFIG_FB_MSM_MDDI_NOVATEK_FWVGA) += mddi_novatek_fwvga.o mddi_nt_panels/
 obj-$(CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) += mddi_sony_s6d05a1_hvga.o
 obj-$(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) += mddi_hitachi_r61529_hvga.o
+obj-$(CONFIG_FB_MSM_MDDI_SII_HVGA_LCD) += mddi_sii_r61529_hvga.o
 obj-$(CONFIG_FB_MSM_MDDI_SHARP_QVGA_128x128) += mddi_sharp.o
 obj-$(CONFIG_FB_MSM_MDDI_ORISE) += mddi_orise.o
 obj-$(CONFIG_FB_MSM_MDDI_QUICKVX) += mddi_quickvx.o
