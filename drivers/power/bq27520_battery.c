@@ -40,7 +40,10 @@
 #define REG_CMD_FLAGS 0x0A
 #define REG_CMD_SOC 0x2C
 #define REG_CMD_AVG_CURRENT 0x14
+#define REG_CMD_HEALTH 0x28
+#define REG_CMD_HEALTH_STATE 0x29
 #define REG_CMD_INS_CURRENT 0x30
+#define REG_CMD_DESIGNEDCAPACITY 0x3C
 #define REG_CMD_APPSTATUS 0x6A
 
 #define REG_EXT_CMD_DATA_FLASH_CLASS 0x3E
@@ -92,6 +95,7 @@
 #define USB_CHG  0x01
 #define WALL_CHG 0x02
 
+#define SOH_VALUE_READY 0x3
 
 #define POLL_QEN_TIMEOUT_MS 2000
 #define POLL_QEN_PERIOD_MS 100
@@ -112,6 +116,14 @@
 
 #define IT_ENABLE_DELAY_MS 500
 
+/* Confirmed with TI-Dallas that 2 seconds is enough to delay after
+ * fully charged for the gauge to do all measurements before
+ * charger can be turned off.
+ */
+#define IT_ENABLE_DELAY_AFTER_FULLY_CHARGED_S 2
+
+#define GOLDEN_PROJ_NAME_LEN 4
+
 /* #define DEBUG_FS */
 
 /* Parameter update support.
@@ -129,7 +141,14 @@ struct override_value {
 struct bq27520_golden_info {
 	u16 fw_compatible_version;
 	u16 golden_file_version;
-	char project_name[4];
+	char project_name[GOLDEN_PROJ_NAME_LEN];
+};
+
+struct bq27520_capacity_scaling {
+	bool enable;
+	int capacity_to_scale[2];
+	int disable_capacity_level;
+	int scaled_capacity;
 };
 
 struct bq27520_data {
@@ -145,6 +164,7 @@ struct bq27520_data {
 	struct work_struct soc_int_work;
 	struct work_struct init_work;
 	struct delayed_work fc_work;
+	struct delayed_work fc_it_delay_work;
 	struct workqueue_struct *wq;
 	int current_avg;
 	int impedance;
@@ -154,13 +174,14 @@ struct bq27520_data {
 	int control_status;
 	int app_status;
 	int chg_connected;
+	int designed_capacity;
+	int health;
 	struct mutex lock;
 	struct mutex int_lock;
 	struct mutex data_flash_lock;
 	int got_technology;
 	int lipo_bat_max_volt;
 	int lipo_bat_min_volt;
-	unsigned char capacity_scaling[2];
 	char *battery_dev_name;
 	char *set_batt_charged_dev_name;
 	int started_worker;
@@ -171,7 +192,9 @@ struct bq27520_data {
 	u8 resume_temp;
 	s8 sealed;
 	bool run_init_after_rom;
+	atomic_t write_prohibit;
 	struct bq27520_block_table *udatap;
+	struct bq27520_capacity_scaling cap_scale;
 
 #ifdef DEBUG_FS
 	struct override_value bat_volt_debug;
@@ -187,6 +210,49 @@ static int get_supplier_data(struct device *dev, void *data);
 static int bq27520_read_control_status(struct bq27520_data *bd);
 static int bq27520_write_control(struct bq27520_data *bd, int subcmd);
 static int bq27520_read_bat_flags(struct power_supply *bat_ps);
+static bool bq27520_read_soc(struct bq27520_data *bd);
+
+static int calculate_scaled_capacity(struct bq27520_data *bd)
+{
+	struct bq27520_capacity_scaling *cs = &bd->cap_scale;
+	int capacity = bd->curr_capacity;
+
+	if (!cs->enable)
+		return capacity;
+
+	/* Calculates the scaled capacity where remainder of the
+	 * fraction is rounded to nearest integer.
+	 */
+	if (cs->capacity_to_scale[0] != cs->capacity_to_scale[1])
+		capacity = min(100,
+			       (bd->curr_capacity * cs->capacity_to_scale[0] +
+				(cs->capacity_to_scale[1] >> 1)) /
+			       cs->capacity_to_scale[1]);
+
+	if (bd->chg_connected) {
+		if (capacity < cs->disable_capacity_level) {
+			cs->disable_capacity_level = capacity;
+			dev_dbg(&bd->clientp->dev,
+				"Cap to stop scale lowered %d%%\n",
+				cs->disable_capacity_level);
+		} else if (bd->curr_capacity_level !=
+			   POWER_SUPPLY_CAPACITY_LEVEL_FULL) {
+			if (bd->curr_capacity >= cs->disable_capacity_level) {
+				dev_dbg(&bd->clientp->dev,
+					"Disabling scaled capacity\n");
+				cs->enable = false;
+				capacity = bd->curr_capacity;
+			} else {
+				dev_dbg(&bd->clientp->dev,
+					"Waiting in cap to level %d%%\n",
+					bd->cap_scale.disable_capacity_level);
+				capacity = cs->disable_capacity_level;
+			}
+		}
+	}
+
+	return capacity;
+}
 
 #ifdef DEBUG_FS
 static int read_sysfs_interface(const char *pbuf, s32 *pvalue, u8 base)
@@ -348,26 +414,26 @@ static ssize_t show_capacity(struct device *dev,
 	 * Prevent that by never reporting 0.
 	 */
 	if (bd->rom_clientp || bd->run_init_after_rom) {
-		if (!bd->curr_capacity)
+		if (!bd->cap_scale.scaled_capacity)
 			capacity = 1;
 		else
-			capacity = bd->curr_capacity;
+			capacity = bd->cap_scale.scaled_capacity;
+
 		return scnprintf(buf, PAGE_SIZE, "%d\n", capacity);
 	} else if (!atomic_read(&bq27520_init_ok)) {
 		return -EBUSY;
 	}
 
 	mutex_lock(&bd->lock);
-	if (bd->capacity_scaling[0] == bd->capacity_scaling[1]) {
-		capacity = bd->curr_capacity;
-	} else {
-		capacity = min(100,
-			       (bd->curr_capacity * bd->capacity_scaling[0] +
-				(bd->capacity_scaling[1] >> 1)) /
-			       bd->capacity_scaling[1]);
-		dev_dbg(&bd->clientp->dev, "Report scaled cap %d (origin %d)\n",
+	capacity = bd->cap_scale.scaled_capacity;
+
+#ifdef DEBUG
+	if (capacity != bd->curr_capacity)
+		dev_dbg(&bd->clientp->dev,
+			"Report scaled cap %d (origin %d)\n",
 			capacity, bd->curr_capacity);
-	}
+#endif
+
 #ifdef DEBUG_FS
 	if (bd->bat_cap_debug.active)
 		capacity = bd->bat_cap_debug.value;
@@ -577,9 +643,9 @@ static int bq27520_make_sure_bat_is_removed(struct bq27520_data *bd)
 {
 	const unsigned int poll_cnt = POLL_QEN_TIMEOUT_MS / POLL_QEN_PERIOD_MS;
 	int rc = bq27520_read_bat_flags(&bd->bat_ps);
-	unsigned int i;
 
 	if (!rc && bd->flags & BAT_DET_MASK) {
+		unsigned int i;
 		dev_info(&bd->clientp->dev, "Writing BAT_REMOVE\n");
 		bq27520_write_control(bd, SUB_CMD_BAT_REMOVE);
 
@@ -591,10 +657,9 @@ static int bq27520_make_sure_bat_is_removed(struct bq27520_data *bd)
 			else
 				break;
 		}
+		if (i == poll_cnt && (bd->flags & BAT_DET_MASK))
+			rc = -ETIME;
 	}
-
-	if (i == poll_cnt && (bd->flags & BAT_DET_MASK))
-		rc = -ETIME;
 
 	return rc;
 }
@@ -923,12 +988,13 @@ static ssize_t show_fg_cmd(struct device *dev,
 	u16 fw_ver = 0;
 	s32 rc;
 	struct bq27520_golden_info gi;
+	char name[GOLDEN_PROJ_NAME_LEN + 1];
 
 	dev_dbg(&bd->clientp->dev, "%s()\n", __func__);
 
 	if (bd->rom_clientp)
 		/* In ROM mode. Return '0' */
-		return scnprintf(buf, PAGE_SIZE, "0x0000 0x0000 0x0000\n");
+		return scnprintf(buf, PAGE_SIZE, "0x0000 0x0000 0x0000 xxxx\n");
 
 	rc = bq27520_get_fw_version(bd->clientp, &fw_ver);
 	if (rc < 0) {
@@ -944,13 +1010,18 @@ static ssize_t show_fg_cmd(struct device *dev,
 		return rc;
 	}
 
-	return scnprintf(buf, PAGE_SIZE, "0x%.4x 0x%.4x 0x%.4x", fw_ver,
-			 gi.fw_compatible_version, gi.golden_file_version);
+	memcpy(name, gi.project_name, GOLDEN_PROJ_NAME_LEN);
+	name[GOLDEN_PROJ_NAME_LEN] = '\0';
+
+	return scnprintf(buf, PAGE_SIZE, "0x%.4x 0x%.4x 0x%.4x %s\n", fw_ver,
+			 gi.fw_compatible_version, gi.golden_file_version,
+			 name);
 }
 
 static struct device_attribute sysfs_attrs[] = {
 	__ATTR(capacity,     S_IRUGO, show_capacity, NULL),
-	__ATTR(fg_cmd,       S_IRUSR|S_IWUSR, show_fg_cmd, store_fg_cmd),
+	__ATTR(fg_cmd,       S_IRUSR|S_IWUSR|S_IROTH, show_fg_cmd,
+		store_fg_cmd),
 #ifdef DEBUG_FS
 	__ATTR(set_voltage,  S_IWUSR, NULL, store_voltage),
 	__ATTR(set_current,  S_IWUSR, NULL, store_current),
@@ -1085,6 +1156,59 @@ static int bq27520_read_control_status(struct bq27520_data *bd)
 	return 0;
 }
 
+static int bq27520_read_designed_capacity(struct power_supply *bat_ps)
+{
+	s32 rc;
+	struct bq27520_data *bd =
+		container_of(bat_ps, struct bq27520_data, bat_ps);
+
+	rc = i2c_smbus_read_word_data(bd->clientp, REG_CMD_DESIGNEDCAPACITY);
+	if (rc < 0)
+		return rc;
+
+	bd->designed_capacity = rc;
+
+	dev_dbg(&bd->clientp->dev, "%s() rc=%d\n", __func__,
+						bd->designed_capacity);
+
+	return 0;
+}
+
+static s32 bq27520_read_health_state(struct power_supply *bat_ps)
+{
+	struct bq27520_data *bd =
+		container_of(bat_ps, struct bq27520_data, bat_ps);
+
+	return i2c_smbus_read_byte_data(bd->clientp, REG_CMD_HEALTH_STATE);
+}
+
+static int bq27520_read_health(struct power_supply *bat_ps)
+{
+	s32 rc;
+	struct bq27520_data *bd =
+		container_of(bat_ps, struct bq27520_data, bat_ps);
+
+	rc = bq27520_read_health_state(bat_ps);
+	if (rc < 0)
+		return rc;
+
+	if (rc != SOH_VALUE_READY) {
+		bd->health = 100;
+		return 0;
+	}
+
+	rc = i2c_smbus_read_byte_data(bd->clientp, REG_CMD_HEALTH);
+	if (rc < 0)
+		return rc;
+
+	bd->health = rc;
+
+	dev_dbg(&bd->clientp->dev, "%s() health=%d rc=%d\n",
+		 __func__, bd->health, rc);
+
+	return 0;
+}
+
 static int bq27520_write_control(struct bq27520_data *bd, int subcmd)
 {
 	s32 rc = i2c_smbus_write_word_data(bd->clientp, REG_CMD_CONTROL,
@@ -1126,7 +1250,14 @@ static int bq27520_wait_for_qen_set(struct bq27520_data *bd)
 static int bq27520_write_temperature(struct bq27520_data *bd, int temp)
 {
 	int k = temp + A_TEMP_COEF_DEFINE;
-	s32 rc = i2c_smbus_write_word_data(bd->clientp, REG_CMD_TEMPERATURE, k);
+	s32 rc = -EAGAIN;
+
+	if (!atomic_cmpxchg(&bd->write_prohibit, 0, 1)) {
+		rc = i2c_smbus_write_word_data(bd->clientp,
+					       REG_CMD_TEMPERATURE, k);
+		atomic_set(&bd->write_prohibit, 0);
+	}
+
 	dev_dbg(&bd->clientp->dev, "%s() k=%d rc=%d\n", __func__, k, rc);
 	return rc;
 }
@@ -1310,11 +1441,14 @@ static void bq27520_init_worker(struct work_struct *work)
 		}
 	}
 	msleep(1000);
-	bq27520_read_bat_capacity(&bd->bat_ps);
+	bq27520_read_soc(bd);
 	bq27520_read_bat_current_avg(&bd->bat_ps);
+	bq27520_read_designed_capacity(&bd->bat_ps);
 	bq27520_read_bat_flags(&bd->bat_ps);
 	if (bd->curr_capacity == 0 && !(bd->flags & SYSDOWN_MASK))
 		bd->curr_capacity = 1;
+
+	bd->cap_scale.scaled_capacity = calculate_scaled_capacity(bd);
 
 	dev_info(&bd->clientp->dev, "%s(): capacity=%d flags=0x%x\n",
 		 __func__, bd->curr_capacity, bd->flags);
@@ -1393,6 +1527,24 @@ static int bq27520_bat_get_property(struct power_supply *bat_ps,
 			val->intval = bd->bat_curr_debug.value * 1000;
 #endif
 		break;
+
+	case POWER_SUPPLY_PROP_CHARGE_FULL:
+		rc = bq27520_read_health(bat_ps);
+		if (rc)
+			break;
+
+		/* val->intval(umAh) =
+		designed_capacity(mAh) * 1000 * health(%) / 100 */
+		val->intval =
+		bd->designed_capacity * bd->health * 10;
+
+		break;
+
+	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+		val->intval = bd->designed_capacity * 1000;
+
+		break;
+
 	default:
 		rc = -EINVAL;
 		break;
@@ -1412,6 +1564,26 @@ static void stop_read_fc(struct bq27520_data *bd)
 	dev_dbg(&bd->clientp->dev, "%s()\n", __func__);
 	if (delayed_work_pending(&bd->fc_work))
 		cancel_delayed_work_sync(&bd->fc_work);
+}
+
+static void bq27520_fc_it_delay_worker(struct work_struct *work)
+{
+	struct delayed_work *dwork =
+		container_of(work, struct delayed_work, work);
+	struct bq27520_data *bd =
+		container_of(dwork, struct bq27520_data, fc_it_delay_work);
+
+	dev_info(&bd->clientp->dev,
+		 "Fully charged (after IT) (SOC=%d%%)\n",
+		 bd->curr_capacity);
+
+	mutex_lock(&bd->lock);
+	atomic_set(&bd->write_prohibit, 0);
+	bd->curr_capacity_level =
+		POWER_SUPPLY_CAPACITY_LEVEL_FULL;
+	mutex_unlock(&bd->lock);
+
+	power_supply_changed(&bd->bat_ps);
 }
 
 static void bq27520_read_fc_worker(struct work_struct *work)
@@ -1437,16 +1609,52 @@ static void bq27520_read_fc_worker(struct work_struct *work)
 		    bd->chg_connected &&
 		    bd->curr_capacity_level !=
 		    POWER_SUPPLY_CAPACITY_LEVEL_FULL) {
-			bd->curr_capacity_level =
-				POWER_SUPPLY_CAPACITY_LEVEL_FULL;
-			changed = 1;
+			if (!bd->cap_scale.enable) {
+				bd->cap_scale.enable = true;
+				bd->cap_scale.capacity_to_scale[0] = 100;
+				bd->cap_scale.capacity_to_scale[1] =
+					bd->curr_capacity;
+				bd->cap_scale.disable_capacity_level = 100;
+			}
+
+			if (bd->curr_capacity == 100 &&
+			    !delayed_work_pending(&bd->fc_it_delay_work)) {
+				/* This is a controlled place to enable IT.
+				 * This command will make OCV, DOD updates
+				 * and this is good if the system can not
+				 * put battery in relax mode after fully charge.
+				 */
+				if (!atomic_cmpxchg(&bd->write_prohibit,
+						    0, 1)) {
+					bq27520_write_control(bd,
+						      SUB_CMD_IT_ENABLE);
+					queue_delayed_work(bd->wq,
+						   &bd->fc_it_delay_work,
+				   HZ * IT_ENABLE_DELAY_AFTER_FULLY_CHARGED_S);
+				}
+			} else {
+				dev_info(&bd->clientp->dev,
+					 "Fully charged (SOC=%d%%)\n",
+					 bd->curr_capacity);
+				changed = 1;
+				bd->curr_capacity_level =
+					POWER_SUPPLY_CAPACITY_LEVEL_FULL;
+			}
 		} else if (!(bd->flags & FC_MASK) &&
 			   bd->curr_capacity_level !=
 			   POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN) {
+			dev_info(&bd->clientp->dev,
+				 "Recharge needed (SOC=%d%%)\n",
+				 bd->curr_capacity);
 			bd->curr_capacity_level =
 				POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN;
 			changed = 1;
 		}
+
+		if (changed)
+			bd->cap_scale.scaled_capacity =
+				calculate_scaled_capacity(bd);
+
 		mutex_unlock(&bd->lock);
 
 		if (changed)
@@ -1456,42 +1664,55 @@ static void bq27520_read_fc_worker(struct work_struct *work)
 	queue_delayed_work(bd->wq, &bd->fc_work, HZ * READ_FC_TIMER);
 }
 
-static void bq27520_handle_soc_worker(struct work_struct *work)
+static bool bq27520_read_soc(struct bq27520_data *bd)
 {
-	int valid_cap = 0;
-	struct bq27520_data *bd =
-		container_of(work, struct bq27520_data, soc_int_work);
-
-	mutex_lock(&bd->lock);
-
+	bool valid_cap = false;
 	if (bd->got_technology &&
-		bd->technology == POWER_SUPPLY_TECHNOLOGY_UNKNOWN) {
+	    bd->technology == POWER_SUPPLY_TECHNOLOGY_UNKNOWN) {
 		if (!bq27520_read_bat_voltage(&bd->bat_ps)) {
 			bd->curr_capacity =
 			((clamp(bd->curr_mv,
 			bd->lipo_bat_min_volt, bd->lipo_bat_max_volt) -
 			bd->lipo_bat_min_volt) * 100) /
 			(bd->lipo_bat_max_volt - bd->lipo_bat_min_volt);
-			valid_cap = 1;
+			valid_cap = true;
 		}
 	} else if (!bq27520_read_bat_capacity(&bd->bat_ps))
-			valid_cap = 1;
+		valid_cap = true;
 
 	if (!bq27520_read_bat_flags(&bd->bat_ps) &&
-			(bd->flags & SYSDOWN_MASK)) {
+	    (bd->flags & SYSDOWN_MASK)) {
 		dev_info(&bd->clientp->dev, "Shutting down because of low "
 			 "voltage (SOC = %u%%).\n", bd->curr_capacity);
 		bd->curr_capacity = 0;
-		valid_cap = 1;
+		valid_cap = true;
 	} else if (valid_cap && bd->curr_capacity == 0) {
 		bd->curr_capacity = 1;
 		dev_info(&bd->clientp->dev, "SOC is 0%% and no SYSDOWN.\n");
 	}
 
+	return valid_cap;
+}
+
+static void bq27520_handle_soc_worker(struct work_struct *work)
+{
+	struct bq27520_data *bd =
+		container_of(work, struct bq27520_data, soc_int_work);
+	bool valid_cap;
+	int soh_state;
+
+	mutex_lock(&bd->lock);
+
+	valid_cap = bq27520_read_soc(bd);
+
 	if (!bq27520_write_control(bd, SUB_CMD_NULL)) {
 		usleep(WAIT_ON_READ_SUB_CMD_US);
 		bq27520_read_control_status(bd);
 	}
+
+	soh_state = bq27520_read_health_state(&bd->bat_ps);
+	if (soh_state < 0)
+		soh_state = 0;
 
 	mutex_unlock(&bd->lock);
 
@@ -1512,14 +1733,33 @@ static void bq27520_handle_soc_worker(struct work_struct *work)
 					POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN;
 			}
 		}
+
+		/* As long as we are in fully charge mode scale the capacity
+		 * to show 100 %.
+		 */
+		if (bd->curr_capacity_level ==
+		    POWER_SUPPLY_CAPACITY_LEVEL_FULL) {
+			bd->cap_scale.capacity_to_scale[0] = 100;
+			bd->cap_scale.capacity_to_scale[1] =
+				clamp(bd->curr_capacity,
+				      bd->polling_lower_capacity,
+				      bd->polling_upper_capacity);
+			dev_dbg(&bd->clientp->dev,
+				"Scale cap with 100/%d\n",
+				bd->cap_scale.capacity_to_scale[1]);
+		}
+
+		bd->cap_scale.scaled_capacity =	calculate_scaled_capacity(bd);
+
 		mutex_unlock(&bd->lock);
 
 		power_supply_changed(&bd->bat_ps);
 	}
 	dev_info(&bd->clientp->dev,
-		 "%s() capacity=%d flags=0x%x ctrl_status=0x%x valid=%d\n",
-		 __func__, bd->curr_capacity, bd->flags, bd->control_status,
-		 valid_cap);
+		 "%s() capacity=%d (%d) flags=0x%x ctrl_status=0x%x"
+		 " soh_state=0x%x, valid=%d\n",
+		 __func__, bd->curr_capacity, bd->cap_scale.scaled_capacity,
+		 bd->flags, bd->control_status, soh_state, valid_cap);
 }
 
 static irqreturn_t bq27520_soc_thread_irq(int irq, void *data)
@@ -1586,6 +1826,7 @@ static void bq27520_ext_pwr_change_worker(struct work_struct *work)
 	struct bq27520_data *bd =
 		container_of(work, struct bq27520_data, ext_pwr_change_work);
 	int chg_connected = power_supply_am_i_supplied(&bd->bat_ps);
+	int technology = bd->technology;
 
 	if (chg_connected != bd->chg_connected) {
 		mutex_lock(&bd->lock);
@@ -1597,19 +1838,53 @@ static void bq27520_ext_pwr_change_worker(struct work_struct *work)
 				stop_read_fc(bd);
 				bd->started_worker = 0;
 			}
+
+			if (bd->cap_scale.enable) {
+				if (bd->cap_scale.scaled_capacity != 100) {
+					bd->cap_scale.capacity_to_scale[0] =
+						bd->cap_scale.scaled_capacity;
+					bd->cap_scale.capacity_to_scale[1] =
+						bd->curr_capacity;
+				} else {
+					bd->cap_scale.capacity_to_scale[0] =
+						100;
+					bd->cap_scale.capacity_to_scale[1] =
+					clamp(bd->curr_capacity,
+					      bd->polling_lower_capacity,
+					      bd->polling_upper_capacity);
+				}
+
+				dev_dbg(&bd->clientp->dev,
+					"Cap to scale at disconn %d/%d\n",
+					bd->cap_scale.capacity_to_scale[0],
+					bd->cap_scale.capacity_to_scale[1]);
+			}
+
 			bd->curr_capacity_level =
 				POWER_SUPPLY_CAPACITY_LEVEL_UNKNOWN;
-		} else if (!bd->started_worker &&
-			   bd->curr_capacity >= bd->polling_lower_capacity &&
-			   bd->curr_capacity <= bd->polling_upper_capacity) {
-			start_read_fc(bd);
-			bd->started_worker = 1;
+		} else {
+			if (bd->cap_scale.enable) {
+				bd->cap_scale.disable_capacity_level =
+					bd->cap_scale.scaled_capacity;
+				dev_dbg(&bd->clientp->dev,
+					"Cap to stop scale %d%%\n",
+					bd->cap_scale.disable_capacity_level);
+			}
+
+			if (!bd->started_worker &&
+			    bd->curr_capacity >= bd->polling_lower_capacity &&
+			    bd->curr_capacity <= bd->polling_upper_capacity) {
+				start_read_fc(bd);
+				bd->started_worker = 1;
+			}
 		}
 		mutex_unlock(&bd->lock);
 	}
 	class_for_each_device(power_supply_class, NULL, &bd->bat_ps,
 			      get_supplier_data);
 
+	if (technology != bd->technology)
+		bq27520_battery_info_setting(bd, bd->technology, bd->bat_temp);
 }
 
 static void bq27520_bat_external_power_changed(struct power_supply *bat_ps)
@@ -1651,7 +1926,7 @@ static int bq27520_pm_resume(struct device *dev)
 
 	if (bd->resume_int) {
 		bd->resume_int = 0;
-		bq27520_handle_soc_worker(&bd->soc_int_work);
+		queue_work(bd->wq, &bd->soc_int_work);
 	}
 
 	if (bd->resume_temp) {
@@ -1684,6 +1959,9 @@ static int __exit bq27520_remove(struct i2c_client *client)
 	if (delayed_work_pending(&bd->fc_work))
 		cancel_delayed_work_sync(&bd->fc_work);
 
+	if (delayed_work_pending(&bd->fc_it_delay_work))
+		cancel_delayed_work_sync(&bd->fc_it_delay_work);
+
 	destroy_workqueue(bd->wq);
 
 	sysfs_remove_attrs(bd->bat_ps.dev);
@@ -1703,7 +1981,9 @@ static enum power_supply_property bq27520_bat_main_props[] = {
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_CURRENT_AVG,
-	POWER_SUPPLY_PROP_PRESENT
+	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_CHARGE_FULL,
+	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN
 };
 
 static const struct i2c_device_id bq27520_id[] = {
@@ -1762,8 +2042,6 @@ static int bq27520_probe(struct i2c_client *client,
 		bd->battery_dev_name = pdata->battery_dev_name;
 		bd->lipo_bat_max_volt = pdata->lipo_bat_max_volt;
 		bd->lipo_bat_min_volt = pdata->lipo_bat_min_volt;
-		memcpy(bd->capacity_scaling, pdata->capacity_scaling,
-		       sizeof(bd->capacity_scaling));
 		bd->polling_lower_capacity = pdata->polling_lower_capacity;
 		bd->polling_upper_capacity = pdata->polling_upper_capacity;
 		bd->udatap = pdata->udatap;
@@ -1803,10 +2081,13 @@ static int bq27520_probe(struct i2c_client *client,
 		goto probe_exit_mem_free;
 	}
 
+	atomic_set(&bd->write_prohibit, 0);
+
 	INIT_WORK(&bd->init_work, bq27520_init_worker);
 	INIT_WORK(&bd->ext_pwr_change_work, bq27520_ext_pwr_change_worker);
 	INIT_WORK(&bd->soc_int_work, bq27520_handle_soc_worker);
 	INIT_DELAYED_WORK(&bd->fc_work, bq27520_read_fc_worker);
+	INIT_DELAYED_WORK(&bd->fc_it_delay_work, bq27520_fc_it_delay_worker);
 
 	rc = power_supply_register(&client->dev, &bd->bat_ps);
 	if (rc) {

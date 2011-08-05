@@ -44,7 +44,7 @@ static const struct novatek_reg_set novatek_init_regs[] = {
 	{ 0x9E80, 0x0000 },
 	{ 0x9F80, 0x0000 },
 	{ 0xA080, 0x000A },
-	{ 0xA280, 0x0005 },
+	{ 0xA280, 0x0006 },
 	{ 0xA380, 0x002E },
 	{ 0xA480, 0x000E },
 	{ 0xA580, 0x00C0 },
@@ -57,7 +57,6 @@ static const struct novatek_reg_set novatek_init_regs[] = {
 	{ 0xFB80, 0x0000 },
 	{ 0xF380, 0x00CC },
 	{ 0xFBC0, 0x0001 },
-	{ 0x8CC9, 0x00C0 },	/* Disable internal resistor */
 	{ 0x8CC1, 0x0040 },
 	{ 0x89CE, 0x0003 },
 	{ 0x8FCE, 0x0013 },
@@ -184,9 +183,9 @@ static const struct novatek_reg_set novatek_init_regs[] = {
 
 static const struct novatek_reg_set novatek_setup_regs[] = {
 	{ 0x3500, 0x0000 },	/* Set TE ON */
-	{ 0x4400, 0x0000 },
+	{ 0x4400, 0x0001 },
 	{ 0x4401, 0x0000 },	/* Set Tear line */
-	{ 0x3600, 0x00d4 },	/* SET_ADDRESS_MODE */
+	{ 0x3600, 0x0000 },	/* SET_ADDRESS_MODE */
 	{ 0x3A00, 0x0077 },	/* SET_PIXEL_FORMAT */
 	{ 0x0000,     10 },	/* Wait 10ms (min.) */
 	{ 0x1100, 0x0000 },	/* EXIT_SLEEP_MODE */

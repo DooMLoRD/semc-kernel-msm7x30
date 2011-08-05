@@ -109,7 +109,7 @@
 #define AKM8975_GPIO				92
 #define NOVATEK_GPIO_RESET			157
 
-#define MSM_PMEM_SF_SIZE	0x500000
+#define MSM_PMEM_SF_SIZE	0x1300000
 #define MSM_FB_SIZE		0x500000
 #define MSM_GPU_PHYS_SIZE       SZ_2M
 #define MSM_PMEM_ADSP_SIZE      0x1800000
@@ -137,6 +137,8 @@
 #define MSM_RAM_CONSOLE_START   (0x50000000 - MSM_RAM_CONSOLE_SIZE)
 #define MSM_RAM_CONSOLE_SIZE    (128 * SZ_1K)
 #endif
+
+#define USB_VREG_MV		3500	/* usb voltage regulator mV */
 
 /* GPIO hardware device identification */
 enum board_hwid {
@@ -1381,6 +1383,23 @@ struct novatek_i2c_pdata novatek_i2c_pdata = {
 	.panels = novatek_panels,
 };
 
+static struct as3676_als_config as3676_als_config = {
+	.gain = AS3676_GAIN_1,
+	.filter_up = AS3676_FILTER_1HZ,
+	.filter_down = AS3676_FILTER_1HZ,
+	.source = AS3676_ALS_SOURCE_GPIO2,
+	.curve = {
+		[AS3676_AMB_GROUP_1] = {
+			.y0 = 49,
+			.y3 = 255,
+			.k1 = 71,
+			.k2 = 54,
+			.x1 =  1,
+			.x2 = 33,
+		},
+	},
+};
+
 static struct as3676_platform_led as3676_pdata_leds[] = {
 	{
 		.name = "lcd-backlight",
@@ -1394,25 +1413,26 @@ static struct as3676_platform_led as3676_pdata_leds[] = {
 		.name = "red",
 		.sinks = BIT(AS3676_SINK_41),
 		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
-		.max_current = 4000,
+		.max_current = 3000,
 	},
 	{
 		.name = "green",
 		.sinks = BIT(AS3676_SINK_42),
 		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
-		.max_current = 4000,
+		.max_current = 3000,
 	},
 	{
 		.name = "blue",
 		.sinks = BIT(AS3676_SINK_43),
 		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
-		.max_current = 4000,
+		.max_current = 3000,
 	},
 };
 
 static struct as3676_platform_data as3676_platform_data = {
 	.leds = as3676_pdata_leds,
 	.num_leds = ARRAY_SIZE(as3676_pdata_leds),
+	.als_config = &as3676_als_config,
 	.als_connected = 1,
 	.dls_connected = 1,
 };
@@ -1500,6 +1520,13 @@ static struct gp2a_platform_data gp2a_platform_data = {
 	.gpio_shutdown = gp2a_gpio_teardown,
 };
 
+static struct cypress_callback *cy_callback;
+
+static void cy_register_cb(struct cypress_callback *cy)
+{
+	cy_callback = cy;
+}
+
 static struct cypress_touch_platform_data cypress_touch_data = {
 	.x_min		= 0,
 	.x_max		= 479,
@@ -1511,7 +1538,14 @@ static struct cypress_touch_platform_data cypress_touch_data = {
 	.reset_polarity	= 1,
 	.irq_polarity	= IRQF_TRIGGER_FALLING,
 	.no_fw_update = 0,
+	.register_cb	= cy_register_cb,
 };
+
+void charger_connected(int on)
+{
+	if (cy_callback && cy_callback->cb)
+		cy_callback->cb(cy_callback, on);
+}
 
 static void cypress_touch_gpio_init(void)
 {
@@ -1609,7 +1643,9 @@ static struct max17040_platform_data max17040_platform_data = {
 		.temp_co_hot = 1400,
 		.temp_co_cold = 9725,
 		.temp_div = 1000,
-	}
+	},
+	.chg_max_temp = 550,
+	.chg_min_temp = 50,
 };
 
 static struct i2c_board_info msm_i2c_board_info[] = {
@@ -1814,7 +1850,7 @@ static int msm_hsusb_ldo_init(int init)
 		vreg_3p3 = vreg_get(NULL, "usb");
 		if (IS_ERR(vreg_3p3))
 			return PTR_ERR(vreg_3p3);
-		vreg_set_level(vreg_3p3, 3500);
+		vreg_set_level(vreg_3p3, USB_VREG_MV);
 	} else
 		vreg_put(vreg_3p3);
 
@@ -1841,13 +1877,15 @@ static int msm_hsusb_ldo_enable(int enable)
 
 static int msm_hsusb_ldo_set_voltage(int mV)
 {
-	static int cur_voltage = 3500;
+	static int cur_voltage = USB_VREG_MV;
 
 	if (!vreg_3p3 || IS_ERR(vreg_3p3))
 		return -ENODEV;
 
 	if (cur_voltage == mV)
 		return 0;
+
+	charger_connected(USB_VREG_MV == mV);
 
 	cur_voltage = mV;
 
@@ -1995,7 +2033,7 @@ static int kgsl_cpufreq_vote(struct msm_cpufreq_voter *v)
 }
 
 static struct kgsl_cpufreq_voter kgsl_cpufreq_voter = {
-	.idle = 0,
+	.idle = 1,
 	.voter = {
 		.vote = kgsl_cpufreq_vote,
 	},
@@ -2347,13 +2385,16 @@ static struct platform_device semc_rpc_handset_device = {
 #ifdef CONFIG_SIMPLE_REMOTE_PLATFORM
 #define PLUG_DET_ENA_PIN 80
 #define PLUG_DET_READ_PIN 26
+#define MODE_SWITCH_PIN -1
 
 int simple_remote_pf_initialize_gpio(struct simple_remote_platform_data *data)
 {
 	int err = 0;
+	int i;
 
 	if (!data || -1 == data->headset_detect_enable_pin) {
-		printk(KERN_ERR "*** %s - Error: Invalid inparameter (GPIO Pins)."
+		printk(KERN_ERR
+		       "*** %s - Error: Invalid inparameter (GPIO Pins)."
 		       " Aborting!\n", __func__);
 		return -EIO;
 	}
@@ -2394,7 +2435,44 @@ int simple_remote_pf_initialize_gpio(struct simple_remote_platform_data *data)
 	else
 		data->invert_plug_det = 0;
 
+	if (0 < data->headset_mode_switch_pin) {
+		printk(KERN_INFO "%s - This device supports HS Mode switch\n",
+		       __func__);
+		err = gpio_request(data->headset_mode_switch_pin,
+				   "Simple_remote_headset_mode_switch");
+		if (err) {
+			printk(KERN_CRIT
+			       "%s - Error %d - Request hs-mode_switch pin",
+			       __func__, err);
+			goto out_hs_det_read;
+		}
+
+		err = gpio_direction_output(data->headset_mode_switch_pin, 0);
+		if (err) {
+			printk(KERN_CRIT
+			       "%s - Error %d - Set hs-mode_switch pin as "
+			       "input\n", __func__, err);
+			goto out_hs_mode_switch;
+		}
+	}
+
+	for (i = 0; i < data->num_regs; i++) {
+		data->regs[i].reg = vreg_get(NULL, data->regs[i].name);
+		if (IS_ERR(data->regs[i].reg)) {
+			printk(KERN_ERR "%s - Failed to find regulator %s\n",
+			       __func__, data->regs[i].name);
+			err = PTR_ERR(data->regs[i].reg);
+			if (0 <= data->headset_mode_switch_pin)
+				goto out_hs_mode_switch;
+			else
+				goto out_hs_det_read;
+		}
+	}
+
 	return err;
+
+out_hs_mode_switch:
+	gpio_free(data->headset_mode_switch_pin);
 
 out_hs_det_read:
 	gpio_free(data->headset_detect_read_pin);
@@ -2412,11 +2490,27 @@ void simple_remote_pf_deinitialize_gpio(
 	gpio_free(data->headset_detect_enable_pin);
 }
 
+static struct simple_remote_platform_regulators regs[] =  {
+	{
+		.name = "ncp",
+	},
+	{
+		.name = "s3",
+	},
+	{
+		.name = "s2",
+	},
+};
+
 static struct simple_remote_platform_data simple_remote_pf_data = {
 	.headset_detect_enable_pin = PLUG_DET_ENA_PIN,
 	.headset_detect_read_pin = PLUG_DET_READ_PIN,
+	.headset_mode_switch_pin = MODE_SWITCH_PIN,
 	.initialize = &simple_remote_pf_initialize_gpio,
 	.deinitialize = &simple_remote_pf_deinitialize_gpio,
+
+	.regs = regs,
+	.num_regs = ARRAY_SIZE(regs),
 
 	.controller = PM_HSED_CONTROLLER_1,
 };

@@ -2,7 +2,7 @@
  * TSIF Driver
  *
  * Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
- * Copyright (c) 2011 Sony Ericsson Mobile Communications AB
+ * Copyright (c) 2010 Sony Ericsson Mobile Communications AB
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -35,6 +35,8 @@
 #include <linux/clk.h>
 #include <linux/wakelock.h>
 #include <linux/tsif_api.h>
+#include <linux/pm_runtime.h>
+#include <linux/slab.h>          /* kfree, kzalloc */
 
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>         /* kfree, kzalloc */
@@ -269,18 +271,115 @@ static void tsif_clock(struct msm_tsif_device *tsif_device, int on)
 /* ===clocks end=== */
 /* ===gpio begin=== */
 
+static void tsif_gpios_free(const struct msm_gpio *table, int size)
+{
+	int i;
+	const struct msm_gpio *g;
+	for (i = size-1; i >= 0; i--) {
+		g = table + i;
+		gpio_free(GPIO_PIN(g->gpio_cfg));
+	}
+}
+
+static int tsif_gpios_request(const struct msm_gpio *table, int size)
+{
+	int rc;
+	int i;
+	const struct msm_gpio *g;
+	for (i = 0; i < size; i++) {
+		g = table + i;
+		rc = gpio_request(GPIO_PIN(g->gpio_cfg), g->label);
+		if (rc) {
+			pr_err("gpio_request(%d) <%s> failed: %d\n",
+			       GPIO_PIN(g->gpio_cfg), g->label ?: "?", rc);
+			goto err;
+		}
+	}
+	return 0;
+err:
+	tsif_gpios_free(table, i);
+	return rc;
+}
+
+static int tsif_gpios_disable(const struct msm_gpio *table, int size)
+{
+	int rc = 0;
+	int i;
+	const struct msm_gpio *g;
+	for (i = size-1; i >= 0; i--) {
+		int tmp;
+		g = table + i;
+		tmp = gpio_tlmm_config(g->gpio_cfg, GPIO_CFG_DISABLE);
+		if (tmp) {
+			pr_err("gpio_tlmm_config(0x%08x, GPIO_CFG_DISABLE)"
+			       " <%s> failed: %d\n",
+			       g->gpio_cfg, g->label ?: "?", rc);
+			pr_err("pin %d func %d dir %d pull %d drvstr %d\n",
+			       GPIO_PIN(g->gpio_cfg), GPIO_FUNC(g->gpio_cfg),
+			       GPIO_DIR(g->gpio_cfg), GPIO_PULL(g->gpio_cfg),
+			       GPIO_DRVSTR(g->gpio_cfg));
+			if (!rc)
+				rc = tmp;
+		}
+	}
+
+	return rc;
+}
+
+static int tsif_gpios_enable(const struct msm_gpio *table, int size)
+{
+	int rc;
+	int i;
+	const struct msm_gpio *g;
+	for (i = 0; i < size; i++) {
+		g = table + i;
+		rc = gpio_tlmm_config(g->gpio_cfg, GPIO_CFG_ENABLE);
+		if (rc) {
+			pr_err("gpio_tlmm_config(0x%08x, GPIO_CFG_ENABLE)"
+			       " <%s> failed: %d\n",
+			       g->gpio_cfg, g->label ?: "?", rc);
+			pr_err("pin %d func %d dir %d pull %d drvstr %d\n",
+			       GPIO_PIN(g->gpio_cfg), GPIO_FUNC(g->gpio_cfg),
+			       GPIO_DIR(g->gpio_cfg), GPIO_PULL(g->gpio_cfg),
+			       GPIO_DRVSTR(g->gpio_cfg));
+			goto err;
+		}
+	}
+	return 0;
+err:
+	tsif_gpios_disable(table, i);
+	return rc;
+}
+
+static int tsif_gpios_request_enable(const struct msm_gpio *table, int size)
+{
+	int rc = tsif_gpios_request(table, size);
+	if (rc)
+		return rc;
+	rc = tsif_gpios_enable(table, size);
+	if (rc)
+		tsif_gpios_free(table, size);
+	return rc;
+}
+
+static void tsif_gpios_disable_free(const struct msm_gpio *table, int size)
+{
+	tsif_gpios_disable(table, size);
+	tsif_gpios_free(table, size);
+}
+
 static int tsif_start_gpios(struct msm_tsif_device *tsif_device)
 {
 	struct msm_tsif_platform_data *pdata =
 		tsif_device->pdev->dev.platform_data;
-	return msm_gpios_request_enable(pdata->gpios, pdata->num_gpios);
+	return tsif_gpios_request_enable(pdata->gpios, pdata->num_gpios);
 }
 
 static void tsif_stop_gpios(struct msm_tsif_device *tsif_device)
 {
 	struct msm_tsif_platform_data *pdata =
 		tsif_device->pdev->dev.platform_data;
-	msm_gpios_disable_free(pdata->gpios, pdata->num_gpios);
+	tsif_gpios_disable_free(pdata->gpios, pdata->num_gpios);
 }
 
 /* ===gpio end=== */
@@ -626,7 +725,7 @@ static int tsif_dma_init(struct msm_tsif_device *tsif_device)
 	/* Note: don't pass device,
 	   it require coherent_dma_mask id device definition */
 	tsif_device->data_buffer = dma_alloc_coherent(NULL, TSIF_BUF_SIZE,
-				&tsif_device->data_buffer_dma, GFP_DMA);
+				&tsif_device->data_buffer_dma, GFP_KERNEL);
 	if (!tsif_device->data_buffer)
 		goto err;
 	dev_info(&tsif_device->pdev->dev, "data_buffer: %p phys 0x%08x\n",

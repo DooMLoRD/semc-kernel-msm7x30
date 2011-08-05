@@ -775,6 +775,9 @@ uint32 mdp4_overlay_format(struct mdp4_overlay_pipe *pipe)
 	if (pipe->alpha_enable)
 		format |= MDP4_FORMAT_ALPHA_ENABLE;
 
+	if (pipe->flags & MDP_SOURCE_ROTATED_90)
+		format |= MDP4_FORMAT_90_ROTATED;
+
 	format |= (pipe->unpack_count << 13);
 	format |= ((pipe->bpp - 1) << 9);
 	format |= (pipe->a_bit << 6);
@@ -1414,6 +1417,10 @@ int mdp4_overlay_set(struct fb_info *info, struct mdp_overlay *req)
 	req->id = pipe->pipe_ndx;	/* pipe_ndx start from 1 */
 	pipe->req_data = *req;		/* keep original req */
 
+	pipe->flags = req->flags;
+
+	mdp4_stat.overlay_set[pipe->mixer_num]++;
+
 	if (pipe->mixer_num == MDP4_MIXER0) {
 		mdp4_vg_qseed_init(pipe->mixer_num);
 	}
@@ -1564,13 +1571,6 @@ int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req,
 		pipe->srcp1_ystride = pipe->src_width;
 	}
 
-#ifdef CONFIG_FB_MSM_MDDI
-	if (pipe->mixer_num == MDP4_MIXER0) {
-		if (ctrl->panel_mode & MDP4_PANEL_MDDI)
-			mdp4_mddi_dma_busy_wait(mfd, pipe);
-	}
-#endif
-
 	if (pipe->pipe_num >= OVERLAY_PIPE_VG1)
 		mdp4_overlay_vg_setup(pipe);	/* video/graphic pipe */
 	else
@@ -1595,13 +1595,10 @@ int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req,
 			mdp4_overlay_reg_flush(pipe, 1);
 #ifdef CONFIG_FB_MSM_MDDI
 		else if (ctrl->panel_mode & MDP4_PANEL_MDDI) {
-
-#ifdef MDP4_NONBLOCKING
-			if (mfd->panel_power_on)
-#else
-			if (!mfd->dma->busy && mfd->panel_power_on)
-#endif
-				mdp4_mddi_overlay_kickoff(mfd, pipe);
+			if (mfd->panel_power_on) {
+				mdp4_mddi_dma_busy_wait(mfd, pipe);
+				mdp4_mddi_kickoff_video(mfd, pipe);
+			}
 		}
 	}
 #endif
@@ -1612,3 +1609,48 @@ int mdp4_overlay_play(struct fb_info *info, struct msmfb_overlay_data *req,
 
 	return 0;
 }
+
+int mdp4_overlay_refresh(struct fb_info *info, int ndx)
+{
+	/*
+	 * Flushes the registers for external interface
+	 * to run mdp4_overlay_play without updating image.
+	 */
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	struct mdp4_overlay_pipe *pipe;
+
+	if (mfd == NULL)
+		return -ENODEV;
+
+	pipe = mdp4_overlay_ndx2pipe(ndx);
+	if (pipe == NULL)
+		return -ENODEV;
+
+	if (pipe->mixer_num != MDP4_MIXER1)
+		return -ENODEV;
+
+	if (down_interruptible(&mfd->dma->ov_sem))
+		return -EINTR;
+
+	if (pipe != ctrl->stage[pipe->mixer_num][pipe->mixer_stage]) {
+		up(&mfd->dma->ov_sem);
+		return -ENODEV;
+	}
+
+	if (pipe->pipe_num >= OVERLAY_PIPE_VG1)
+		mdp4_overlay_vg_setup(pipe);	/* video/graphic pipe */
+	else
+		mdp4_overlay_rgb_setup(pipe);	/* rgb pipe */
+
+	ctrl->mixer1_played++;
+	/* external interface */
+	if (ctrl->panel_mode & MDP4_PANEL_DTV)
+		mdp4_overlay_reg_flush(pipe, 1);
+	else if (ctrl->panel_mode & MDP4_PANEL_ATV)
+		mdp4_overlay_reg_flush(pipe, 1);
+
+	up(&mfd->dma->ov_sem);
+
+	return 0;
+}
+

@@ -562,9 +562,9 @@ static void mmc_sd_detect(struct mmc_host *host)
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
 #ifndef CONFIG_MMC_SD_DETECT_CHATTERING
         int retries = 5;
-#else /* CONFIG_MMC_SD_DETECT_CHATTERING */
+#else
         int retries = 100;
-#endif /* CONFIG_MMC_SD_DETECT_CHATTERING */
+#endif
 #endif
 
 	BUG_ON(!host);
@@ -582,9 +582,9 @@ static void mmc_sd_detect(struct mmc_host *host)
 			retries--;
 #ifndef CONFIG_MMC_SD_DETECT_CHATTERING
 			udelay(5);
-#else /* CONFIG_MMC_SD_DETECT_CHATTERING */
+#else
 			mdelay(1);
-#endif /* CONFIG_MMC_SD_DETECT_CHATTERING */
+#endif
 			continue;
 		}
 		break;

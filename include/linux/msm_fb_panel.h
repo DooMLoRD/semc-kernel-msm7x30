@@ -14,6 +14,18 @@ typedef enum {
 	MAX_PHYS_TARGET_NUM,
 } DISP_TARGET_PHYS;
 
+/* panel type list */
+#define NO_PANEL		0xffff	/* No Panel */
+#define MDDI_PANEL		1	/* MDDI */
+#define EBI2_PANEL		2	/* EBI2 */
+#define LCDC_PANEL		3	/* internal LCDC type */
+#define EXT_MDDI_PANEL		4	/* Ext.MDDI */
+#define TV_PANEL		5	/* TV */
+#define HDMI_PANEL		6	/* HDMI TV */
+#define DTV_PANEL		7	/* DTV */
+#define MIPI_VIDEO_PANEL	8	/* MIPI */
+#define MIPI_CMD_PANEL		9	/* MIPI */
+
 /* panel info type */
 struct lcd_panel_info {
 	__u32 vsync_enable;
@@ -84,6 +96,7 @@ struct msm_fb_panel_data {
 	void (*window_adjust)(u16 x1, u16 x2, u16 y1, u16 y2);
 	int power_on_panel_at_pan;
 	struct platform_device *next;
+	int (*clk_func) (int enable);
 };
 
 #endif

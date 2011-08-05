@@ -58,7 +58,7 @@
 #endif
 
 /* FIXME- Use firmware-loader facility */
-#include "cypress-firmware-0087.h"
+#include "cypress-firmware-0x0072.h"
 
 /*--------------------------------------------------------------------------*/
 
@@ -147,7 +147,7 @@
 #define	FIRMWARE_USER_BLOCKS		(237)
 #define	FIRMWARE_TOTAL_BLOCKS		(256)
 
-#define	TOUCH_DATA_BYTES		(TP_REG_PNT4Z)
+#define	TOUCH_DATA_BYTES		(TP_REG_PNT4Z + 1)
 
 #define	BL_CMD_BL_ENTER			(0x38)
 #define	BL_CMD_WR_BLOCK			(0x39)
@@ -159,6 +159,11 @@
 #define TP_SPI_BUFFER_VALID_MASK	0xC0	/* mask bits 6, 7 in reg 2 */
 #define TP_SPI_BUFFER_VALID		0x40	/* bit 6 set = accept data */
 #define TP_SPI_BUFFER_VALID_VER		87	/* FW version 87 and above */
+#define TP_FW_NSB_VALID_VER		114	/* FW version 0x72 and above */
+
+/* cypress firmware SSD versus DSD type field - 0x13 */
+#define TP_PANEL_TYPE_SSD		0x07	/* SSD display */
+#define TP_PANEL_TYPE_DSD		0x08	/* DSD display */
 
 #ifdef	DEBUG
 #define	DEBUG_PRINTK(format, args...) \
@@ -188,6 +193,7 @@ struct cy8ctma300_touch {
 	struct mutex				mutex;
 	struct spi_device			*spi;
 	struct work_struct			fwupd_work;
+	struct work_struct			isr_work;
 	struct spi_message			async_spi_message;
 	struct spi_transfer			async_spi_transfer;
 	u8			async_read_buf[TOUCH_DATA_BYTES];
@@ -212,6 +218,13 @@ struct cy8ctma300_touch {
 #endif
 	u8 					suspend;
 	int					use_spi_buffer_valid;
+	int					tp_fw_type;	/* DSD/SSD */
+	int					fw_version;
+	struct cypress_callback			cb_struct;
+	struct work_struct			charger_work;
+	int	                                nsb_work_todo;
+	int					nsb_state;
+	int					nsb_new_state;
 };
 
 struct fw_packet {
@@ -233,6 +246,9 @@ static int dump_noisy = 1;
 
 static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this);
 static int reset_device(struct cy8ctma300_touch *this);
+static void charger_noise_suppression(struct cy8ctma300_touch *this,
+					struct spi_device *spi);
+
 /*--------------------------------------------------------------------------*/
 
 static void dump_buf(u8 *buf, unsigned len)
@@ -600,10 +616,27 @@ static int query_chip(struct spi_device *spi)
 	printk(KERN_INFO
 		"CY8CTMA300_TOUCH: Application FW Ver %d.%d\n", j[0], j[1]);
 	appver = j[0] << 8 | j[1];
+	this->fw_version = appver;
+
 	reg_read(spi, TP_BISTR_UID_0, j, 2);
 	printk(KERN_INFO
 		"CY8CTMA300_TOUCH: Silicon Revision %c\n", ((j[0] == 0x05)
 		&& (j[1] == 0x80)) ? 'D' : 'E');
+
+	reg_read(spi, TP_BISTR_AP_IDH, j, 1);
+	printk(KERN_INFO "CY8CTMA300_TOUCH: Customer ID %d\n", j[0]);
+
+	reg_read(spi, TP_BISTR_AP_IDL, j, 1);
+
+	this->tp_fw_type = j[0];
+
+	if (TP_PANEL_TYPE_SSD == this->tp_fw_type)
+		printk(KERN_INFO "CY8CTMA300_TOUCH: SSD firmware"
+			" [Project ID %d]\n", this->tp_fw_type);
+
+	if (TP_PANEL_TYPE_DSD == this->tp_fw_type)
+		printk(KERN_INFO "CY8CTMA300_TOUCH: DSD firmware"
+			" [Project ID %d]\n", this->tp_fw_type);
 
 	/* when firmware is 87 or above, use SPI buffer valid check */
 	this->use_spi_buffer_valid = (TP_SPI_BUFFER_VALID_VER <= appver);
@@ -721,7 +754,7 @@ reset_chip:
 };
 
 static void cy8ctma300_send_input(struct cy8ctma300_touch *this, u8 down,
-	u16 x, u16 y, u16 id)
+				  u16 x, u16 y, u16 z, u16 id)
 {
 	DEBUG_PRINTK(KERN_INFO
 		"CY8CTMA300_TOUCH: down %u x %u y %u id %u\n", down, x, y, id);
@@ -731,8 +764,7 @@ static void cy8ctma300_send_input(struct cy8ctma300_touch *this, u8 down,
 
 	input_report_abs(this->input, ABS_MT_POSITION_X, x);
 	input_report_abs(this->input, ABS_MT_POSITION_Y, y);
-	input_report_abs(this->input, ABS_MT_TOUCH_MAJOR, 1);
-	input_report_abs(this->input, ABS_MT_TOUCH_MINOR, 1);
+	input_report_abs(this->input, ABS_MT_TOUCH_MAJOR, z);
 	input_report_abs(this->input, ABS_MT_TRACKING_ID, id - 1);
 
 };
@@ -740,10 +772,17 @@ static void cy8ctma300_send_input(struct cy8ctma300_touch *this, u8 down,
 static void cy8ctma300_touch_isr(void *context)
 {
 	struct cy8ctma300_touch *this = (struct cy8ctma300_touch *)context;
+	schedule_work(&this->isr_work);
+}
+
+static void cy8ctma300_isr_work(struct work_struct *work)
+{
+	struct cy8ctma300_touch	*this =
+		container_of(work, struct cy8ctma300_touch, isr_work);
 	struct cypress_touch_platform_data
 		*pdata = this->spi->dev.platform_data;
 	u8 read_buf[TOUCH_DATA_BYTES];
-	u16 xp = 0, yp = 0, id = 0;
+	u16 xp = 0, yp = 0, z = 0, id = 0;
 	u8 down;
 
 	DEBUG_PRINTK(KERN_DEBUG "CY8CTMA300_TOUCH: cy8ctma300_touch_isr()\n");
@@ -780,6 +819,7 @@ static void cy8ctma300_touch_isr(void *context)
 	xp = read_buf[TP_REG_PNT1XL] | (read_buf[TP_REG_PNT1XH] << 8);
 	yp = read_buf[TP_REG_PNT1YL] | (read_buf[TP_REG_PNT1YH] << 8);
 	yp = (pdata->y_max) - yp;
+	z = read_buf[TP_REG_PNT1Z];
 	id = read_buf[TP_REG_PNT12_ID] >> 4 & 0xF;
 
 	input_report_key(this->input, BTN_TOUCH, down ? 1 : 0);
@@ -787,10 +827,11 @@ static void cy8ctma300_touch_isr(void *context)
 	if (down == 1) {
 		input_report_abs(this->input, ABS_X, xp);
 		input_report_abs(this->input, ABS_Y, yp);
+		input_report_abs(this->input, ABS_PRESSURE, z);
 	};
 
 	if (down) {
-		cy8ctma300_send_input(this, down, xp, yp, id);
+		cy8ctma300_send_input(this, down, xp, yp, z, id);
 
 		if (down > 1) {
 			xp = read_buf[TP_REG_PNT2XL] |
@@ -798,8 +839,9 @@ static void cy8ctma300_touch_isr(void *context)
 			yp = read_buf[TP_REG_PNT2YL] |
 				(read_buf[TP_REG_PNT2YH] << 8);
 			yp = (pdata->y_max) - yp;
+			z = read_buf[TP_REG_PNT2Z];
 			id = read_buf[TP_REG_PNT12_ID] & 0xF;
-			cy8ctma300_send_input(this, down, xp, yp, id);
+			cy8ctma300_send_input(this, down, xp, yp, z, id);
 		};
 
 		if (down > 2) {
@@ -808,8 +850,9 @@ static void cy8ctma300_touch_isr(void *context)
 			yp = read_buf[TP_REG_PNT3YL] |
 				(read_buf[TP_REG_PNT3YH] << 8);
 			yp = (pdata->y_max) - yp;
+			z = read_buf[TP_REG_PNT3Z];
 			id = read_buf[TP_REG_PNT34_ID] >> 4 & 0xF;
-			cy8ctma300_send_input(this, down, xp, yp, id);
+			cy8ctma300_send_input(this, down, xp, yp, z, id);
 		};
 
 		if (down > 3) {
@@ -818,8 +861,9 @@ static void cy8ctma300_touch_isr(void *context)
 			yp = read_buf[TP_REG_PNT4YL] |
 				(read_buf[TP_REG_PNT4YH] << 8);
 			yp = (pdata->y_max) - yp;
+			z = read_buf[TP_REG_PNT4Z];
 			id = read_buf[TP_REG_PNT34_ID] & 0xF;
-			cy8ctma300_send_input(this, down, xp, yp, id);
+			cy8ctma300_send_input(this, down, xp, yp, z, id);
 		};
 	};
 
@@ -910,6 +954,11 @@ static int cy8ctma300_touch_resume(struct spi_device *spi)
 	if (data != TP_REG_HST_MODE)
 		return -ENODEV;
 
+	mutex_lock(&this->mutex);
+	if (this->nsb_work_todo)
+		schedule_work(&this->charger_work);
+	mutex_unlock(&this->mutex);
+
 	return rc;
 };
 #endif
@@ -968,6 +1017,89 @@ static ssize_t cy8ctma300_touch_ioctl(struct inode *inode, struct file *file,
 	return err;
 };
 
+static void charger_noise_suppression(struct cy8ctma300_touch *this,
+					struct spi_device *spi)
+{
+	u8 j[1];
+	int count = 0;
+	int reg_is_valid = 0;
+	int cmd;
+
+	mutex_lock(&this->mutex);
+
+	cmd = this->nsb_new_state ? 3 : 2;
+
+	if ((this->suspend) || (!this->has_been_initialized)) {
+		this->nsb_work_todo = 1;
+		this->nsb_new_state = (cmd == 3) ? 1 : 0;
+		mutex_unlock(&this->mutex);
+		return;
+	}
+
+	DISABLE_IRQ(this);
+
+	if (cmd == this->nsb_state) {
+		this->nsb_work_todo = 0;
+		ENABLE_IRQ(this);
+		mutex_unlock(&this->mutex);
+		return; /* nothing to do */
+	}
+
+	if (this->fw_version < TP_FW_NSB_VALID_VER) {
+		this->nsb_work_todo = 0;
+		ENABLE_IRQ(this);
+		mutex_unlock(&this->mutex);
+		return;
+	}
+
+	/*
+	 * Undocumented:
+	 * In SYSTEM INFO mode register with an offset [0x06]
+	 * defines charger state.  By default its value is 0
+	 * which means it is not initialized and just does normal scan.
+	 * To enable Charger Noise Suppression do the following:
+	 * Switch to SYS INFO MODE: write 0x10 to register 0x00
+	 * Write 0x03 value in reg [0x06], write value 0x00 to reg
+	 * [0x02] and switch back to operational mode by setting
+	 * correspondent bits in reg [0x00].
+	 *
+	 * The same operation should be performed to clear bit but
+	 * the value 0x02 should be written to reg [0x06] in SYS INFO MODE.
+	 * The action is taken when mode is switched back to operational
+	 * from SYS INFO.
+	 *
+	 * Cypress requested this be done in a while loop and added a verify bit
+	 */
+	do {
+		reg_write_byte(spi, TP_REG_HST_MODE, 0x10);
+		msleep(100);
+		/* set or clear charger noise suppression bit */
+		reg_write_byte(spi, 0x06, cmd);
+		reg_write_byte(spi, 0x02, 0x00);
+		reg_write_byte(spi, TP_REG_HST_MODE, 0x00);
+		msleep(100);
+		/* readback register 0x1B indicates bit set */
+		reg_read(spi, 0x1B, j, 1);
+		if (cmd == j[0]) {
+			reg_is_valid = 1;
+			this->nsb_state = cmd;
+			this->nsb_work_todo = 0;
+			break;
+		}
+		count++;
+	} while ((count < 16) && (!reg_is_valid)); /* 16 per Cypress */
+	if (!reg_is_valid)
+		dev_err(&spi->dev, "%s: noise filter bit write failed.\n",
+				__func__);
+	else
+		dev_info(&spi->dev, "%s: charger noise filter %s\n",
+			__func__, cmd == 3 ? "enabled" : "disabled");
+
+	ENABLE_IRQ(this);
+	mutex_unlock(&this->mutex);
+	return;
+	}
+
 static const struct file_operations cy8ctma300_touch_fops = {
 	.owner   = THIS_MODULE,
 	.open    = cy8ctma300_touch_open,
@@ -1012,8 +1144,7 @@ static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this)
 		pdata->x_min, pdata->x_max, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
 		pdata->y_min, pdata->y_max, 0, 0);
-	input_set_abs_params(this->input, ABS_MT_TOUCH_MAJOR, 0, 1, 0, 0);
-	input_set_abs_params(this->input, ABS_MT_TOUCH_MINOR, 0, 1, 0, 0);
+	input_set_abs_params(this->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	set_bit(ABS_MT_TRACKING_ID, this->input->absbit);
 
 	/* Single-Touch stuff */
@@ -1021,7 +1152,7 @@ static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this)
 		pdata->x_max, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, pdata->y_min,
 		pdata->y_max, 0, 0);
-	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 0, 0, 0);
+	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 255, 0, 0);
 
 	err = input_register_device(input_dev);
 	if (err)
@@ -1087,6 +1218,15 @@ static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this)
 		"CY8CTMA300_TOUCH: cy8ctma300_deferred_init() ok\n");
 	this->init_complete++;
 	this->has_been_initialized = 1;
+
+	mutex_lock(&this->mutex);
+	if (this->nsb_work_todo) {
+		if (!this->fw_version)
+			query_chip(spi);
+		schedule_work(&this->charger_work);
+	}
+	mutex_unlock(&this->mutex);
+
 	return 0;
 
 err_cleanup_device:
@@ -1108,6 +1248,24 @@ err_cleanup_mem:
 
 	return err;
 };
+
+static void cy_callback(void *d, int on)
+{
+	struct cy8ctma300_touch *this;
+	this = container_of(d, struct cy8ctma300_touch, cb_struct);
+	this->nsb_new_state = on;
+	schedule_work(&this->charger_work);
+};
+
+static void cy8ctma300_charger_work(struct work_struct *work)
+{
+	struct cy8ctma300_touch *this =
+	container_of(work, struct cy8ctma300_touch,
+			charger_work);
+
+	charger_noise_suppression(this, this->spi);
+};
+
 
 static int cy8ctma300_touch_probe(struct spi_device *spi)
 {
@@ -1178,8 +1336,15 @@ static int cy8ctma300_touch_probe(struct spi_device *spi)
 	dev_set_drvdata(&spi->dev, this);
 	DEBUG_PRINTK(KERN_DEBUG "CY8CTMA300_TOUCH: Driver data set\n");
 
+	if (pdata->register_cb) {
+		this->cb_struct.cb = cy_callback;
+		pdata->register_cb(&this->cb_struct);
+	}
+
 	/* register firmware validation and initialization to workqueue */
 	INIT_WORK(&this->fwupd_work, cy8ctma300_fwupd_work);
+	INIT_WORK(&this->charger_work, cy8ctma300_charger_work);
+	INIT_WORK(&this->isr_work, cy8ctma300_isr_work);
 	DEBUG_PRINTK(KERN_DEBUG
 		"CY8CTMA300_TOUCH: Firmware-update work queue init OK\n");
 

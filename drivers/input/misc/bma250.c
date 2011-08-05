@@ -372,28 +372,28 @@ static inline int bma250_rate_handler(struct driver_data *dd)
 
 	if (dd->new_cnf.rate > 1000) {
 		sleep = BMA250_MODE_SLEEP_1000MS;
-		filter = BMA250_BW_7_81HZ;
 	} else if (dd->new_cnf.rate > 500) {
 		sleep = BMA250_MODE_SLEEP_500MS;
-		filter = BMA250_BW_15_63HZ;
 	} else if (dd->new_cnf.rate > 100) {
 		sleep = BMA250_MODE_SLEEP_100MS;
-		filter = BMA250_BW_31_25HZ;
 	} else if (dd->new_cnf.rate > 50) {
 		sleep = BMA250_MODE_SLEEP_50MS;
-		filter = BMA250_BW_62_50HZ;
 	} else if (dd->new_cnf.rate > 25) {
 		sleep = BMA250_MODE_SLEEP_25MS;
-		filter = BMA250_BW_125HZ;
 	} else if (dd->new_cnf.rate > 10) {
 		sleep = BMA250_MODE_SLEEP_10MS;
-		filter = BMA250_BW_250HZ;
 	} else if (dd->new_cnf.rate > 6) {
 		sleep = BMA250_MODE_SLEEP_6MS;
-		filter = BMA250_BW_500HZ;
-	} else {
+	}  else {
 		sleep = BMA250_MODE_NOSLEEP;
-		filter = BMA250_BW_1000HZ;
+	}
+
+	if (dd->new_cnf.rate > 100) {
+		filter = BMA250_BW_7_81HZ;
+	} else if (dd->new_cnf.rate > 50) {
+		filter = BMA250_BW_15_63HZ;
+	} else {
+		filter = BMA250_BW_31_25HZ;
 	}
 
 	/* only possible to use sleep together with interrupt */
@@ -426,21 +426,33 @@ static inline int bma250_resolution_handler(struct driver_data *dd)
 	if (dd->new_cnf.resolution == dd->cur_cnf.resolution)
 		return rc;
 
-	if (dd->new_cnf.resolution == INTERRUPT_RESOLUTION)
+	if (dd->new_cnf.resolution == INTERRUPT_RESOLUTION) {
 		/* slope and orientation interrupt based motion detect */
 		interrupt = BMA250_INT_SLOPE_Z |
 				BMA250_INT_SLOPE_Y |
 				BMA250_INT_SLOPE_X |
 				BMA250_INT_ORIENT;
-	else
+	} else {
 		/* disable all interrupts, use timer based solution */
 		interrupt = 0;
+
+		/* only possible to use sleep together with interrupt */
+		rc = bma250_ic_write(dd->ic_dev,BMA250_MODE_CTRL_REG,
+			BMA250_MODE_NOSLEEP);
+		if (rc)
+			goto resolution_error;
+	}
 	rc = bma250_ic_write(dd->ic_dev, BMA250_INT_ENABLE1_REG, interrupt);
 	if (rc)
 		dev_err(&dd->ip_dev->dev,
 			"%s: device failed, error %d\n", __func__, rc);
 	else
 		dd->cur_cnf.resolution = dd->new_cnf.resolution;
+	return rc;
+
+resolution_error:
+	dev_err(&dd->ip_dev->dev,
+		"%s: device failed, error %d\n", __func__, rc);
 	return rc;
 }
 
@@ -737,7 +749,7 @@ static void __devinit bma250_create_dbfs_entry(struct driver_data *dd) { }
 
 static void __devexit bma250_remove_dbfs_entry(struct driver_data *dd) { }
 #endif
-static int __devexit bma250_power_down(struct driver_data *dd)
+static int  bma250_power_down(struct driver_data *dd)
 {
 	int                 rc;
 
@@ -752,7 +764,7 @@ static int __devexit bma250_power_down(struct driver_data *dd)
 	return rc;
 }
 
-static int __devinit bma250_power_up(struct driver_data *dd)
+static int  bma250_power_up(struct driver_data *dd)
 {
 	int                 rc;
 
@@ -818,30 +830,27 @@ config_exit:
 	return rc;
 }
 
-#if defined(CONFIG_PM)
-static int bma250_suspend(struct i2c_client *ic_dev, pm_message_t mesg)
+#ifdef CONFIG_SUSPEND
+static int bma250_suspend(struct device *dev)
 {
-	struct driver_data *dd;
-	dd = bma250_ic_get_data(ic_dev);
+	struct driver_data *dd = dev_get_drvdata(dev);
 
 	bma250_power_down(dd);
-	disable_irq(ic_dev->irq);
-
+	if (dd->ip_dev->users)
+		disable_irq(dd->ic_dev->irq);
 	if (dd->pdata && dd->pdata->teardown)
-		dd->pdata->teardown(&ic_dev->dev);
+		dd->pdata->teardown(&dd->ic_dev->dev);
 
 	return 0;
 }
 
-static int bma250_resume(struct i2c_client *ic_dev)
+static int bma250_resume(struct device *dev)
 {
-	struct driver_data *dd;
+	struct driver_data *dd = dev_get_drvdata(dev);
 	int rc;
 
-	dd = bma250_ic_get_data(ic_dev);
-
 	if (dd->pdata && dd->pdata->setup) {
-		rc = dd->pdata->setup(&ic_dev->dev);
+		rc = dd->pdata->setup(&dd->ic_dev->dev);
 		if (rc)
 			return rc;
 	}
@@ -850,14 +859,11 @@ static int bma250_resume(struct i2c_client *ic_dev)
 	if (rc)
 		return rc;
 
-	enable_irq(ic_dev->irq);
-
+	if (dd->ip_dev->users)
+		enable_irq(dd->ic_dev->irq);
 	return rc;
 }
-#else /* !CONFIG_PM */
-#define bma250_suspend NULL
-#define bma250_resume NULL
-#endif /* CONFIG_PM */
+#endif
 
 static inline int bma250_report_data(struct driver_data *dd)
 {
@@ -1079,15 +1085,23 @@ static const struct i2c_device_id bma250_i2c_id[] = {
 	{}
 };
 
+#ifdef CONFIG_SUSPEND
+static struct dev_pm_ops bma250_pm_ops = {
+	.suspend	= bma250_suspend,
+	.resume		= bma250_resume,
+};
+#endif
+
 static struct i2c_driver bma250_driver = {
 	.driver = {
 		.name  = BMA250_NAME,
 		.owner = THIS_MODULE,
+#ifdef CONFIG_SUSPEND
+		.pm	= &bma250_pm_ops,
+#endif
 	},
 	.probe         = bma250_probe,
 	.remove        = __devexit_p(bma250_remove),
-	.suspend       = bma250_suspend,
-	.resume        = bma250_resume,
 	.id_table      = bma250_i2c_id,
 };
 

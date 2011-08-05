@@ -166,22 +166,6 @@ msmsdcc_request_end(struct msmsdcc_host *host, struct mmc_request *mrq)
 	if (mrq->cmd->error == -ETIMEDOUT)
 		mdelay(5);
 
-#ifdef CONFIG_MMC_MSM_PROG_DONE_SCAN
-	if ((mrq->cmd->opcode == SD_IO_RW_EXTENDED) &&
-			(mrq->cmd->arg & 0x80000000)) {
-		/* If its a write and a cmd53 set the prog_scan flag. */
-		host->prog_scan = 1;
-		/* Send STOP to let the SDCC know to stop. */
-		writel(MCI_CSPM_MCIABORT, host->base + MMCICOMMAND);
-		retval = 1;
-	}
-	if (mrq->cmd->opcode == SD_IO_RW_DIRECT) {
-		/* Ok the cmd52 following a cmd53 is received */
-		/* clear all the flags. */
-		host->prog_scan = 0;
-		host->prog_enable = 0;
-	}
-#endif
 	/*
 	 * Need to drop the host lock here; mmc_request_done may call
 	 * back into the driver...
@@ -264,14 +248,12 @@ msmsdcc_dma_complete_tlet(unsigned long data)
 		if (host->dma.result & DMOV_RSLT_FLUSH)
 			pr_err("%s: DMA channel flushed (0x%.8x)\n",
 			       mmc_hostname(host->mmc), host->dma.result);
-		if (host->dma.err) {
-			pr_err("Flush data: %.8x %.8x %.8x %.8x %.8x %.8x\n",
-			       host->dma.err->flush[0], host->dma.err->flush[1],
-			       host->dma.err->flush[2], host->dma.err->flush[3],
-			       host->dma.err->flush[4],
-			       host->dma.err->flush[5]);
-			msmsdcc_reset_and_restore(host);
-		}
+		pr_err("Flush data: %.8x %.8x %.8x %.8x %.8x %.8x\n",
+		       host->dma.err.flush[0], host->dma.err.flush[1],
+		       host->dma.err.flush[2], host->dma.err.flush[3],
+		       host->dma.err.flush[4],
+		       host->dma.err.flush[5]);
+		msmsdcc_reset_and_restore(host);
 		if (!mrq->data->error)
 			mrq->data->error = -EIO;
 	}
@@ -310,16 +292,6 @@ msmsdcc_dma_complete_tlet(unsigned long data)
 
 			spin_unlock_irqrestore(&host->lock, flags);
 
-#ifdef CONFIG_MMC_MSM_PROG_DONE_SCAN
-			if ((mrq->cmd->opcode == SD_IO_RW_EXTENDED)
-				&& (mrq->cmd->arg & 0x80000000)) {
-				/* set the prog_scan in a cmd53.*/
-				host->prog_scan = 1;
-				/* Send STOP to let the SDCC know to stop. */
-				writel(MCI_CSPM_MCIABORT,
-						host->base + MMCICOMMAND);
-			}
-#endif
 			mmc_request_done(host->mmc, mrq);
 			return;
 		} else
@@ -341,7 +313,8 @@ msmsdcc_dma_complete_func(struct msm_dmov_cmd *cmd,
 	struct msmsdcc_host *host = dma_data->host;
 
 	dma_data->result = result;
-	dma_data->err = err;
+	if (err)
+		memcpy(&dma_data->err, err, sizeof(struct msm_dmov_errdata));
 
 	tasklet_schedule(&host->dma_tlet);
 }
@@ -494,14 +467,6 @@ msmsdcc_start_command_deferred(struct msmsdcc_host *host,
 		*c |= MCI_CPSM_PROGENA;
 		host->prog_enable = 1;
 	}
-
-#ifdef CONFIG_MMC_MSM_PROG_DONE_SCAN
-	if ((cmd->opcode == SD_IO_RW_DIRECT)
-			&& (host->prog_scan == 1)) {
-		*c |= MCI_CPSM_PROGENA;
-		host->prog_enable = 1;
-	}
-#endif
 
 	if (cmd == cmd->mrq->stop)
 		*c |= MCI_CSPM_MCIABORT;
@@ -824,7 +789,14 @@ msmsdcc_irq(int irq, void *dev_id)
 
 		if ((host->plat->dummy52_required) &&
 		    (host->dummy_52_state == DUMMY_52_STATE_SENT)) {
-			if (status & MCI_PROGDONE) {
+			if (status & (MCI_PROGDONE | MCI_CMDCRCFAIL |
+					MCI_CMDTIMEOUT)) {
+				if (status & MCI_CMDTIMEOUT)
+					pr_debug("%s: dummy CMD52 timeout\n",
+						mmc_hostname(host->mmc));
+				if (status & MCI_CMDCRCFAIL)
+					pr_debug("%s: dummy CMD52 CRC failed\n",
+						mmc_hostname(host->mmc));
 				host->dummy_52_state = DUMMY_52_STATE_NONE;
 				host->curr.cmd = NULL;
 				spin_unlock(&host->lock);
@@ -1022,19 +994,25 @@ msmsdcc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 
 	if (host->plat->dummy52_required) {
 		if (host->dummy_52_needed) {
-			if (mrq->data) {
-				host->dummy_52_state = DUMMY_52_STATE_SENT;
-				msmsdcc_start_command(host, &dummy52cmd,
-						      MCI_CPSM_PROGENA);
-				spin_unlock_irqrestore(&host->lock, flags);
-				return;
+			host->dummy_52_state = DUMMY_52_STATE_SENT;
+			msmsdcc_start_command(host, &dummy52cmd,
+					      MCI_CPSM_PROGENA);
+			spin_unlock_irqrestore(&host->lock, flags);
+			if (mrq->data && mrq->data->flags == MMC_DATA_WRITE) {
+				if (mrq->cmd->opcode == SD_IO_RW_EXTENDED ||
+					mrq->cmd->opcode == 54)
+					host->dummy_52_needed = 1;
+			} else {
+				host->dummy_52_needed = 0;
 			}
-			host->dummy_52_needed = 0;
+			return;
 		}
-		if ((mrq->cmd->opcode == SD_IO_RW_EXTENDED) && (mrq->data))
-			host->dummy_52_needed = 1;
+		if (mrq->data && mrq->data->flags == MMC_DATA_WRITE) {
+			if (mrq->cmd->opcode == SD_IO_RW_EXTENDED ||
+				mrq->cmd->opcode == 54)
+				host->dummy_52_needed = 1;
+		}
 	}
-
 	msmsdcc_request_start(host, mrq);
 	spin_unlock_irqrestore(&host->lock, flags);
 }
@@ -1280,9 +1258,11 @@ msmsdcc_platform_sdiowakeup_irq(int irq, void *dev_id)
 	pr_info("%s: SDIO Wake up IRQ : %d\n", __func__, irq);
 	spin_lock(&host->lock);
 	if (!host->sdio_irq_disabled) {
-		wake_lock(&host->sdio_wlock);
 		disable_irq_nosync(irq);
-		disable_irq_wake(irq);
+		if (host->mmc->pm_flags & MMC_PM_WAKE_SDIO_IRQ) {
+			wake_lock(&host->sdio_wlock);
+			disable_irq_wake(irq);
+		}
 		host->sdio_irq_disabled = 1;
 	}
 	spin_unlock(&host->lock);
@@ -1410,6 +1390,7 @@ msmsdcc_probe(struct platform_device *pdev)
 	struct mmc_platform_data *plat = pdev->dev.platform_data;
 	struct msmsdcc_host *host;
 	struct mmc_host *mmc;
+	unsigned long flags;
 	struct resource *irqres = NULL;
 	struct resource *memres = NULL;
 	struct resource *dmares = NULL;
@@ -1546,7 +1527,7 @@ msmsdcc_probe(struct platform_device *pdev)
 	mmc->max_phys_segs = NR_SG;
 	mmc->max_hw_segs = NR_SG;
 	mmc->max_blk_size = 4096;	/* MCI_DATA_CTL BLOCKSIZE up to 4096 */
-	mmc->max_blk_count = 65536;
+	mmc->max_blk_count = 65535;
 
 	mmc->max_req_size = 33554432;	/* MCI_DATA_LENGTH is 25 bits */
 	mmc->max_seg_size = mmc->max_req_size;
@@ -1594,7 +1575,12 @@ msmsdcc_probe(struct platform_device *pdev)
 			goto pio_irq_free;
 		} else {
 			mmc->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
-			disable_irq(plat->sdiowakeup_irq);
+			spin_lock_irqsave(&host->lock, flags);
+			if (!host->sdio_irq_disabled) {
+				disable_irq_nosync(plat->sdiowakeup_irq);
+				host->sdio_irq_disabled = 1;
+			}
+			spin_unlock_irqrestore(&host->lock, flags);
 		}
 	}
 
@@ -1730,11 +1716,11 @@ msmsdcc_probe(struct platform_device *pdev)
 		free_irq(plat->status_irq, host);
  sdiowakeup_irq_free:
 	wake_lock_destroy(&host->sdio_suspend_wlock);
-	if (plat->sdiowakeup_irq) {
-		wake_lock_destroy(&host->sdio_wlock);
+	if (plat->sdiowakeup_irq)
 		free_irq(plat->sdiowakeup_irq, host);
-	}
  pio_irq_free:
+	if (plat->sdiowakeup_irq)
+		wake_lock_destroy(&host->sdio_wlock);
 	free_irq(irqres->start, host);
  irq_free:
 	free_irq(irqres->start, host);

@@ -65,7 +65,7 @@ static int gp2a_initialize(struct gp2a_data *dt)
 	if (rc)
 		return rc;
 
-	rc = gp2a_write_byte(dt, GP2A_ADDR_HYS, 0xc2);
+	rc = gp2a_write_byte(dt, GP2A_ADDR_HYS, 0xce);
 	if (rc)
 		return rc;
 

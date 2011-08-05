@@ -533,9 +533,7 @@ static void reset_config(struct usb_composite_dev *cdev)
 			f->disable(f);
 	}
 	cdev->config = NULL;
-	if (cdev->mute_switch)
-		cdev->mute_switch = 0;
-	else
+	if (!cdev->mute_switch)
 		schedule_work(&cdev->switch_work);
 }
 
@@ -600,6 +598,9 @@ static int set_config(struct usb_composite_dev *cdev,
 	power = c->bMaxPower ? (2 * c->bMaxPower) : CONFIG_USB_GADGET_VBUS_DRAW;
 done:
 	usb_gadget_vbus_draw(gadget, power);
+
+	if (cdev->mute_switch)
+		cdev->mute_switch = 0;
 
 	schedule_work(&cdev->switch_work);
 	return result;
@@ -1114,9 +1115,26 @@ static void composite_disconnect(struct usb_gadget *gadget)
 	 * disconnect callbacks?
 	 */
 	spin_lock_irqsave(&cdev->lock, flags);
-	if (cdev->config)
+	if (cdev->config) {
 		reset_config(cdev);
+	} else if (cdev->mute_switch) {
+		cdev->mute_switch = 0;
+		schedule_work(&cdev->switch_work);
+	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
+}
+
+static void composite_offline(struct usb_gadget *gadget)
+{
+	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
+	unsigned long			flags;
+
+	spin_lock_irqsave(&cdev->lock, flags);
+	if (cdev->config)
+		cdev->mute_switch = 0;
+	spin_unlock_irqrestore(&cdev->lock, flags);
+
+	composite_disconnect(gadget);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1363,6 +1381,7 @@ static struct usb_gadget_driver composite_driver = {
 
 	.setup		= composite_setup,
 	.disconnect	= composite_disconnect,
+	.offline	= composite_offline,
 
 	.suspend	= composite_suspend,
 	.resume		= composite_resume,

@@ -186,15 +186,6 @@ config MACH_SEMC_ZEUS
 	help
 	  Support for the SonyEricsson Zeus devices.
 
-config MACH_SEMC_MOGAMI
-       depends on ARCH_MSM7X30
-       depends on !MSM_STACKED_MEMORY
-       select TI1271
-       default y
-       bool "SonyEricsson Mogami CDB"
-       help
-         Support for the SonyEricsson Mogami CDB (development board).
-
 config MACH_SEMC_ANZU
 	depends on ARCH_MSM7X30
 	depends on !MSM_STACKED_MEMORY
@@ -214,6 +205,45 @@ config MACH_SEMC_HALLON
 	bool "SonyEricsson Hallon"
 	help
 	  Support for the SonyEricsson Hallon devices.
+
+config MACH_SEMC_IYOKAN
+	depends on ARCH_MSM7X30
+	depends on !MSM_STACKED_MEMORY
+	select TI1271
+	select SUPPORT_ALIEN_USB_CHARGER
+	default y
+	bool "SonyEricsson Iyokan"
+	help
+	  Support for the SonyEricsson Iyokan devices.
+
+config MACH_SEMC_URUSHI
+	depends on ARCH_MSM7X30
+	depends on !MSM_STACKED_MEMORY
+	select TI1271
+	select SUPPORT_ALIEN_USB_CHARGER
+	default y
+	bool "SonyEricsson Urushi"
+	help
+	  Support for the SonyEricsson Urushi devices.
+
+config MACH_SEMC_SMULTRON
+	depends on ARCH_MSM7X30
+	depends on !MSM_STACKED_MEMORY
+	select TI1271
+	select SUPPORT_ALIEN_USB_CHARGER
+	default y
+	bool "SonyEricsson Smultron"
+	help
+	  Support for the SonyEricsson Smultron devices.
+
+config MACH_SEMC_MANGO
+	depends on ARCH_MSM7X30
+	depends on !MSM_STACKED_MEMORY
+	select TI1271
+	default n
+	bool "SonyEricsson Mango"
+	help
+	  Support for the SonyEricsson Mango devices.
 
 config MACH_SEMC_AKANE
 	depends on ARCH_MSM7X30
@@ -1408,5 +1438,22 @@ config MOGAMI_PMIC_KEYPAD
 	default n
 	help
 	  This enables the Mogami pmic gpio keypad support.
+
+config SEMC_BATTERY_SHOW_HEALTH
+	bool "Enable battery health support"
+	depends on BATTERY_SEMC_ARCH
+	default n if BATTERY_CHARGALG
+	default y if !BATTERY_CHARGALG
+	help
+	  Enable if battery health property is not supported
+	  in any other module besides this.
+	  This enables support for power supply class
+	  POWER_SUPPLY_PROP_HEALTH property.
+
+config MMC_MSM_SDC4_LOW_DRIVE_STRENGTH
+	bool "Enable low drive strength configuration"
+	default n
+	help
+	  Enable to configure the low drive strength for SDC4.
 
 endif

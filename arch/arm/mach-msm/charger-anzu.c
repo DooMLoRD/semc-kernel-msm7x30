@@ -12,7 +12,7 @@
 
 static struct ambient_temperature_limit limit_tbl = {
 	{0,	42,	43,	127},	/* ambient temp: base */
-	{4,	1,	9,	0},	/* ambient temp: hysteresis */
+	{4,	1,	37,	0},	/* ambient temp: hysteresis */
 };
 
 struct device_data device_data = {

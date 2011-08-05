@@ -113,6 +113,7 @@ struct battery_chargalg_driver {
 	struct work_struct ext_pwr_changed_work;
 	struct delayed_work work;
 	struct mutex lock;
+	struct mutex disable_lock;
 	struct power_supply *ps_batt_volt;
 	struct power_supply *ps_batt_curr;
 	struct power_supply *ps_eoc;
@@ -308,10 +309,10 @@ static ssize_t store_disable_charging(struct device *pdev,
 		struct battery_chargalg_driver *alg =
 			container_of(psy, struct battery_chargalg_driver, ps);
 
-		MUTEX_LOCK(&alg->lock);
+		MUTEX_LOCK(&alg->disable_lock);
 		if (disable != alg->disable_algorithm)
 			alg->disable_algorithm = disable;
-		MUTEX_UNLOCK(&alg->lock);
+		MUTEX_UNLOCK(&alg->disable_lock);
 
 		battery_chargalg_schedule_delayed_work(&alg->work, 0);
 	} else {
@@ -912,10 +913,11 @@ static void battery_chargalg_state_machine(struct battery_chargalg_driver *alg)
 	}
 
 	dev_dbg(alg->dev, "Enter state: %u, chg: %u, disable: %u, disable usb: "
-		"%u, eoc: %u, ovp: %u, timer: %u, temp: %d\n",
+		"%u, eoc: %u, ovp: %u, timer: %u, temp: %d, overheat_cnt: %u\n",
 		alg->state, alg->chg_connected, alg->disable_algorithm,
 		alg->pdata->disable_usb_host_charging, alg->eoc.active,
-		alg->ovp.active, alg->safety_timer.expired, alg->batt_temp);
+		alg->ovp.active, alg->safety_timer.expired, alg->batt_temp,
+		alg->overheat_counter);
 
 	if (!alg->chg_connected || !tlim || !vlim || alg->disable_algorithm ||
 	    ((alg->chg_connected & USB_CHG) &&
@@ -927,6 +929,7 @@ static void battery_chargalg_state_machine(struct battery_chargalg_driver *alg)
 		 */
 		alg->safety_timer.expired = 0;
 		alg->overheat_counter = 0;
+		alg->overheat_counter_inactive = 0;
 
 		if (alg->eoc.active) {
 			alg->eoc.active = 0;
@@ -949,8 +952,10 @@ static void battery_chargalg_state_machine(struct battery_chargalg_driver *alg)
 
 	/* Reset overheat counter when charge cycle restarts */
 	if (POWER_SUPPLY_STATUS_FULL == alg->batt_status &&
-	    alg->overheat_counter)
+	    alg->overheat_counter) {
 		alg->overheat_counter = 0;
+		alg->overheat_counter_inactive = 0;
+	}
 
 	if (next_state != alg->state) {
 		alg->state = next_state;
@@ -1000,16 +1005,17 @@ static void battery_chargalg_state_machine(struct battery_chargalg_driver *alg)
 			next_state = BATT_ALG_STATE_OVERHEAT;
 		break;
 	case BATT_ALG_STATE_OVERHEAT:
-		if (alg->batt_temp < (tlim[BATTERY_CHARGALG_TEMP_WARM] -
-				      alg->pdata->temp_hysteresis_design)) {
-			next_state = BATT_ALG_STATE_WARM;
-			alg->overheat_counter_inactive = 0;
-		}
-
 		if (!alg->overheat_counter_inactive) {
 			alg->overheat_counter_inactive = 1;
 			if (++alg->overheat_counter >= OVERHEAT_COUNTER_MAX)
 				next_state = BATT_ALG_STATE_FAULT_OVERHEAT;
+		}
+
+		if (next_state != BATT_ALG_STATE_FAULT_OVERHEAT &&
+		    alg->batt_temp < (tlim[BATTERY_CHARGALG_TEMP_WARM] -
+				      alg->pdata->temp_hysteresis_design)) {
+			next_state = BATT_ALG_STATE_WARM;
+			alg->overheat_counter_inactive = 0;
 		}
 		break;
 	case BATT_ALG_STATE_FULL:
@@ -1465,9 +1471,9 @@ void battery_chargalg_disable(bool disable)
 
 	dev_dbg(alg->dev, "%s(): dis=%d\n", __func__, disable);
 
-	MUTEX_LOCK(&alg->lock);
+	MUTEX_LOCK(&alg->disable_lock);
 	alg->disable_algorithm = (u8)disable;
-	MUTEX_UNLOCK(&alg->lock);
+	MUTEX_UNLOCK(&alg->disable_lock);
 
 	battery_chargalg_schedule_delayed_work(&alg->work, 0);
 	return;
@@ -1519,6 +1525,7 @@ static int battery_chargalg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&alg->eoc.work, battery_chargalg_eoc_worker);
 	INIT_DELAYED_WORK(&alg->ovp.work, battery_chargalg_ovp_worker);
 	mutex_init(&alg->lock);
+	mutex_init(&alg->disable_lock);
 
 	alg->dev = &pdev->dev;
 	alg->ps.name = alg->pdata->name;

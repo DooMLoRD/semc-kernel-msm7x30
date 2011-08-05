@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/smd_rpcrouter.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2010, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
  * Author: San Mehat <san@android.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -209,6 +209,7 @@ struct rpcrouter_xprt_info {
 	uint32_t need_len;
 	struct work_struct read_data;
 	struct workqueue_struct *workqueue;
+	unsigned char r2r_buf[RPCROUTER_MSGSIZE_MAX];
 };
 
 static LIST_HEAD(xprt_info_list);
@@ -633,6 +634,8 @@ static struct rr_remote_endpoint *rpcrouter_lookup_remote_endpoint(uint32_t pid,
 	list_for_each_entry(ept, &remote_endpoints, list) {
 		if ((ept->pid == pid) && (ept->cid == cid)) {
 			spin_unlock_irqrestore(&remote_endpoints_lock, flags);
+			D("%s: Found r_ept %p for %d:%08x\n", __func__, ept,
+			   pid, cid);
 			return ept;
 		}
 	}
@@ -681,7 +684,7 @@ static int process_control_msg(struct rpcrouter_xprt_info *xprt_info,
 {
 	union rr_control_msg ctl;
 	struct rr_server *server;
-	struct rr_remote_endpoint *r_ept;
+	struct rr_remote_endpoint *r_ept = NULL;
 	int rc = 0;
 	unsigned long flags;
 	static int first = 1;
@@ -732,13 +735,19 @@ static int process_control_msg(struct rpcrouter_xprt_info *xprt_info,
 	case RPCROUTER_CTRL_CMD_RESUME_TX:
 		RR("o RESUME_TX id=%d:%08x\n", msg->cli.pid, msg->cli.cid);
 
-		r_ept = rpcrouter_lookup_remote_endpoint(msg->cli.pid,
+		do {
+			if (r_ept)
+				pr_err("%s: Oops - Wrong r_ept %p\n",
+					__func__, r_ept);
+			r_ept = rpcrouter_lookup_remote_endpoint(msg->cli.pid,
 							 msg->cli.cid);
-		if (!r_ept) {
-			printk(KERN_ERR
-			       "rpcrouter: Unable to resume client\n");
-			break;
-		}
+			if (!r_ept) {
+				printk(KERN_ERR "rpcrouter: Unable to resume"
+						" client\n");
+				return rc;
+			}
+		} while ((r_ept->pid != msg->cli.pid) ||
+			 (r_ept->cid != msg->cli.cid));
 		spin_lock_irqsave(&r_ept->quota_lock, flags);
 		r_ept->tx_quota_cntr = 0;
 		spin_unlock_irqrestore(&r_ept->quota_lock, flags);
@@ -932,8 +941,6 @@ static char *type_to_str(int i)
 }
 #endif
 
-static uint32_t r2r_buf[RPCROUTER_MSGSIZE_MAX];
-
 static void do_read_data(struct work_struct *work)
 {
 	struct rr_header hdr;
@@ -976,9 +983,10 @@ static void do_read_data(struct work_struct *work)
 		if (xprt_info->remote_pid == -1)
 			xprt_info->remote_pid = hdr.src_pid;
 
-		if (rr_read(xprt_info, r2r_buf, hdr.size))
+		if (rr_read(xprt_info, xprt_info->r2r_buf, hdr.size))
 			goto fail_io;
-		process_control_msg(xprt_info, (void *) r2r_buf, hdr.size);
+		process_control_msg(xprt_info,
+				    (void *) xprt_info->r2r_buf, hdr.size);
 		goto done;
 	}
 

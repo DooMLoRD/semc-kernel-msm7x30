@@ -57,6 +57,8 @@ sub usage($)
     print "Examples:\n";
     print "\tSync all defconfigs with Kconfig\n";
     print "\t\$ autoconfig.pl -t s\n\n";
+    print "\tEnable CONFIG_SWAP for Anzu and Smultron\n";
+    print "\t\$ autoconfig.pl -t a:CONFIG_SWAP=y anzu smultron\n\n";
     print "\tDisable CONFIG_USB_SUPPORT for all products\n";
     print "\t\$ autoconfig.pl -t d:CONFIG_USB_SUPPORT\n\n";
     print "\tSet CONFIG_MSM_AMSS_VERSION to 1000 for Anzu\n";

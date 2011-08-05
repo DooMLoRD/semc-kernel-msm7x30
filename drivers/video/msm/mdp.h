@@ -214,6 +214,7 @@ struct mdp_dma_data {
 	boolean waiting;
 	struct semaphore ov_sem;
 	struct semaphore mutex;
+	struct semaphore pending_pipe_sem;
 	struct completion comp;
 };
 
@@ -681,6 +682,13 @@ void mdp_hw_vsync_clk_disable(struct msm_fb_data_type *mfd);
 void mdp_vsync_clk_disable(void);
 void mdp_vsync_clk_enable(void);
 #endif
+
+#ifdef CONFIG_DEBUG_FS
+int mdp_debugfs_init(void);
+#endif
+
+
+
 
 void mdp_dma_s_update(struct msm_fb_data_type *mfd);
 #endif /* MDP_H */

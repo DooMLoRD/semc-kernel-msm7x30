@@ -17,7 +17,6 @@ struct bq27520_platform_data {
 	size_t num_supplicants;
 	int lipo_bat_max_volt;
 	int lipo_bat_min_volt;
-	unsigned char capacity_scaling[2];
 	char *battery_dev_name;
 	int polling_lower_capacity;
 	int polling_upper_capacity;

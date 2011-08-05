@@ -74,11 +74,19 @@ struct sii_record {
 	struct panel_ids pid;
 };
 
-#define DBC_CONTROL_SIZE  5
+#define DBC_CONTROL_SIZE  20
+/* 10% average setting*/
 static u32 dbc_control_on_data[DBC_CONTROL_SIZE] = {
-	0xF0020201, 0x04C0C0F0, 0x1990901F, 0x00A36235, 0x00000000};
+		0x00000001, 0x00000003, 0x00000003, 0x000000FF, 0X000000FF,
+		0x000000ED, 0x000000ED, 0x00000002, 0x00000018, 0X00000010,
+		0x00000010, 0x00000037, 0x0000005A, 0x00000087, 0X000000BE,
+		0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0X00000000};
+
 static u32 dbc_control_off_data[DBC_CONTROL_SIZE] = {
-	0xFF020200, 0x04EBEBFF, 0x1F90901F, 0x00AA6B3D, 0x00000000};
+		0x00000000, 0x00000002, 0x00000002, 0x000000FF, 0X000000FF,
+		0x000000EB, 0x000000EB, 0x00000004, 0x0000001F, 0X00000090,
+		0x00000090, 0x0000001F, 0x0000003D, 0x0000006B, 0X000000AA,
+		0x00000000, 0x00000000, 0x00000000, 0x00000000, 0X00000000};
 
 #ifdef MDDI_SII_DISPLAY_INITIAL
 #define GAMMA_SETTING_SIZE 6
@@ -101,8 +109,9 @@ static void sii_lcd_dbc_on(struct sii_record *rd)
 				DBC_CONTROL_SIZE, TRUE, NULL, MDDI_HOST_PRIM);
 
 		/* Backlight control2 set */
-		mddi_host_register_write16(0xB9, 0x0802FF00, 0, 0, 0, 1,
-			TRUE, NULL, MDDI_HOST_PRIM);
+		mddi_host_register_write16(0xB9, 0x00000000, 0x000000FF,
+				0x00000001, 0x00000008, 4,
+				TRUE, NULL, MDDI_HOST_PRIM);
 
 		/* Manufacture Command Access Protect */
 		mddi_queue_register_write(0xB0, 0x03, TRUE, 0);
@@ -120,12 +129,24 @@ static void sii_lcd_dbc_off(struct sii_record *rd)
 				DBC_CONTROL_SIZE, TRUE, NULL, MDDI_HOST_PRIM);
 
 		/* Backlight control2 set */
-		mddi_host_register_write16(0xB9, 0x0802FF00, 0, 0, 0, 1, TRUE,
-							NULL, MDDI_HOST_PRIM);
+		mddi_host_register_write16(0xB9, 0x00000000, 0x000000FF,
+				0x00000002, 0x00000008, 4,
+				TRUE, NULL, MDDI_HOST_PRIM);
 
 		/* Manufacture Command Access Protect */
 		mddi_queue_register_write(0xB0, 0x03, TRUE, 0);
 	}
+}
+
+static void sii_lcd_window_address_set(enum lcd_registers reg,
+						u16 start, u16 stop)
+{
+	uint32 para;
+
+	para = start;
+	para = (para << 16) | (start + stop);
+	para = swab32(para);
+	mddi_queue_register_write(reg, para, TRUE, 0);
 }
 
 #ifdef MDDI_SII_DISPLAY_INITIAL
@@ -210,6 +231,14 @@ static void sii_lcd_driver_init(struct platform_device *pdev)
 	}
 }
 #endif
+
+static void sii_lcd_window_adjust(uint16 x1, uint16 x2,
+					uint16 y1, uint16 y2)
+{
+	sii_lcd_window_address_set(LCD_REG_COLUMN_ADDRESS, x1, x2);
+	sii_lcd_window_address_set(LCD_REG_PAGE_ADDRESS, y1, y2);
+	mddi_queue_register_write(0x3C, 0x00, TRUE, 0);
+}
 
 static void sii_lcd_exit_sleep(struct sii_record *rd)
 {
@@ -558,6 +587,8 @@ static int mddi_sii_lcd_probe(struct platform_device *pdev)
 		rd->pdata->panel_data->controller_on_panel_on =
 						mddi_sii_ic_on_panel_on;
 		rd->pdata->panel_data->off = mddi_sii_ic_off_panel_off;
+		rd->pdata->panel_data->window_adjust =
+						sii_lcd_window_adjust;
 		rd->pdata->panel_data->power_on_panel_at_pan = 0;
 		pdev->dev.platform_data = rd->pdata->panel_data;
 

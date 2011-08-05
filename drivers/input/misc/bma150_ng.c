@@ -406,8 +406,7 @@ static int bma150d(void *data)
 				__func__, rc);
 			mutex_lock(&dd->lock);
 			/* avoid to call kthread_stop() */
-			if (!kthread_should_stop())
-				dd->bma150d = NULL;
+			dd->bma150d = NULL;
 			mutex_unlock(&dd->lock);
 			return rc;
 		}
@@ -436,15 +435,22 @@ static int bma150_kthread_start(struct driver_data *dd)
 static int bma150_suspend(struct device *dev)
 {
 	struct driver_data *dd = dev_get_drvdata(dev);
+	struct task_struct *ptr;
 
 	mutex_lock(&dd->lock);
 	if (dd->ip_dev->users && dd->bma150d && !IS_ERR(dd->bma150d)) {
-		kthread_stop(dd->bma150d);
+		ptr = dd->bma150d;
 		dd->bma150d = NULL;
+	} else {
+		mutex_unlock(&dd->lock);
+		goto power_down;
 	}
 	mutex_unlock(&dd->lock);
+	kthread_stop(ptr);
 
+power_down:
 	bma150_power_down(dd);
+
 	return 0;
 }
 

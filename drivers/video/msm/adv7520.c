@@ -21,6 +21,7 @@
 #include <linux/adv7520.h>
 #include <linux/time.h>
 #include <linux/completion.h>
+#include <linux/wakelock.h>
 #include "msm_fb.h"
 
 #include "hdmi_common.h"
@@ -44,13 +45,15 @@ static struct hdmi_data *dd;
 static struct work_struct handle_work;
 
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
+static int hdcp_started;
 static struct work_struct hdcp_handle_work;
+static int has_hdcp_hw_support=true;
 #endif
 
 static struct timer_list hpd_timer;
 static unsigned int monitor_sense;
 
-static int hdcp_started;
+struct wake_lock wlock;
 
 /* Change HDMI state */
 static void change_hdmi_state(int online)
@@ -323,6 +326,7 @@ static int adv7520_power_on(struct platform_device *pdev)
 		monitor_sense = adv7520_read_reg(hclient, 0xC6);
 		schedule_work(&handle_work);
 	}
+	wake_lock(&wlock);
 	return request_irq(dd->pd->irq, &adv7520_interrupt,
 		IRQF_TRIGGER_FALLING, "adv7520_cable", dd);
 }
@@ -332,7 +336,7 @@ static int adv7520_power_off(struct platform_device *pdev)
 	DEV_INFO("%s: 'disable_irq', chip off, I2C off\n", __func__);
 	free_irq(dd->pd->irq, dd);
 	adv7520_chip_off();
-
+	wake_unlock(&wlock);
 	gpio_power_on = FALSE;
 	return 0;
 }
@@ -415,7 +419,10 @@ static void adb7520_chip_init(void)
 	/* Set Interrupt Mask register for HPD/HDCP */
 	reg[0x94] = 0xC0;
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
-	reg[0x95] = 0xC0;
+	if( has_hdcp_hw_support )
+		reg[0x95] = 0xC0;	
+	else
+		reg[0x95] = 0x00;
 #else
 	reg[0x95] = 0x00;
 #endif
@@ -478,23 +485,26 @@ static void adv7520_handle_cable_work(struct work_struct *work)
 			adv7520_read_edid();
 
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
-			msleep(500);
-			/* request for HDCP after EDID is read */
-			reg[0xaf] = adv7520_read_reg(hclient, 0xaf);
-			reg[0xaf] |= 0x90;
-			adv7520_write_reg(hclient, 0xaf, reg[0xaf]);
-			reg[0xaf] = adv7520_read_reg(hclient, 0xaf);
-			DEV_INFO("%s Start HDCP reg[0xaf] is %x\n",
-							__func__, reg[0xaf]);
+			if( has_hdcp_hw_support )
+			{
+				msleep(500);
+				/* request for HDCP after EDID is read */
+				reg[0xaf] = adv7520_read_reg(hclient, 0xaf);
+				reg[0xaf] |= 0x90;
+				adv7520_write_reg(hclient, 0xaf, reg[0xaf]);
+				reg[0xaf] = adv7520_read_reg(hclient, 0xaf);
+				DEV_INFO("%s Start HDCP reg[0xaf] is %x\n",
+								__func__, reg[0xaf]);
 
-			reg[0xba] = adv7520_read_reg(hclient, 0xba);
-			reg[0xba] |= 0x10;
-			adv7520_write_reg(hclient, 0xba, reg[0xba]);
-			reg[0xba] = adv7520_read_reg(hclient, 0xba);
-			DEV_INFO("%s reg[0xba] is %x\n",
-						__func__, reg[0xba]);
-			hdcp_started = 1;
-			msleep(500);
+				reg[0xba] = adv7520_read_reg(hclient, 0xba);
+				reg[0xba] |= 0x10;
+				adv7520_write_reg(hclient, 0xba, reg[0xba]);
+				reg[0xba] = adv7520_read_reg(hclient, 0xba);
+				DEV_INFO("%s reg[0xba] is %x\n",
+							__func__, reg[0xba]);
+				hdcp_started = 1;
+				msleep(500);
+			}
 #endif
 		} else
 			DEV_DBG("adv7520_timer: EDID TIMEOUT\n");
@@ -513,13 +523,18 @@ static void adv7520_handle_cable(unsigned long data)
 
 static void adv7520_isr(struct work_struct *work)
 {
-	u8 reg0xc8;
 	u8 reg0x96 = adv7520_read_reg(hclient, 0x96);
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
-	u8 reg0x97 = adv7520_read_reg(hclient, 0x97);
-	DEV_INFO("adv7520_irq: reg[0x96]=%x reg[0x97]=%x\n", reg0x96, reg0x97);
-	/* Clearing the Interrupts */
-	adv7520_write_reg(hclient, 0x97, reg0x97);
+	u8 reg0x97=0;
+	if( has_hdcp_hw_support )
+	{
+		reg0x97 = adv7520_read_reg(hclient, 0x97);
+		DEV_INFO("adv7520_irq: reg[0x96]=%x reg[0x97]=%x\n", reg0x96, reg0x97);
+		/* Clearing the Interrupts */
+		adv7520_write_reg(hclient, 0x97, reg0x97);
+	}
+	else
+		DEV_INFO("adv7520_irq: reg[0x96]=%x\n", reg0x96);
 #else
 	DEV_INFO("adv7520_irq: reg[0x96]=%x\n", reg0x96);
 #endif
@@ -546,23 +561,27 @@ static void adv7520_isr(struct work_struct *work)
 		}
 	}
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
-	if (hdcp_started) {
-		/* BKSV Ready interrupts */
-		if (reg0x97 & 0x40) {
-			DEV_INFO("%s BKSV keys ready\n", __func__);
-			DEV_INFO("Begin HDCP encryption\n");
-			adv7520_hdcp_work_queue();
+	if( has_hdcp_hw_support )
+	{
+		if (hdcp_started) {
+			u8 reg0xc8;
+			/* BKSV Ready interrupts */
+			if (reg0x97 & 0x40) {
+				DEV_INFO("%s BKSV keys ready\n", __func__);
+				DEV_INFO("Begin HDCP encryption\n");
+				adv7520_hdcp_work_queue();
+			}
+			/* HDCP controller error Interrupt */
+			if (reg0x97 & 0x80) {
+				DEV_ERR("adv7520_irq: HDCP_ERROR\n");
+				adv7520_close_hdcp_link();
+			}
+			reg0xc8 = adv7520_read_reg(hclient, 0xc8);
+			DEV_INFO("DDC controller reg[0xC8] = %x\n", reg0xc8);
 		}
-		/* HDCP controller error Interrupt */
-		if (reg0x97 & 0x80) {
-			DEV_ERR("adv7520_irq: HDCP_ERROR\n");
-			adv7520_close_hdcp_link();
-		}
-		reg0xc8 = adv7520_read_reg(hclient, 0xc8);
-		DEV_INFO("DDC controller reg[0xC8] = %x\n", reg0xc8);
+		DEV_INFO("adv7520_irq final reg[0x96]=%x reg[0x97]=%x\n",
+								reg0x96, reg0x97);
 	}
-	DEV_INFO("adv7520_irq final reg[0x96]=%x reg[0x97]=%x\n",
-							reg0x96, reg0x97);
 #endif
 }
 
@@ -622,7 +641,13 @@ adv7520_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	INIT_WORK(&dd->work, adv7520_isr);
 	INIT_WORK(&handle_work, adv7520_handle_cable_work);
 #ifdef CONFIG_FB_MSM_HDMI_ADV7520_PANEL_HDCP_SUPPORT
-	INIT_WORK(&hdcp_handle_work, adv7520_hdcp_enable);
+	if( machine_is_msm7x30_fluid() )
+		has_hdcp_hw_support	= false;
+
+	if( has_hdcp_hw_support )
+		INIT_WORK(&hdcp_handle_work, adv7520_hdcp_enable);
+	else
+		DEV_INFO("%s: no hdcp hw support.\n", __func__);
 #endif
 	msm_fb_add_device(&hdmi_device);
 	return 0;
@@ -642,6 +667,7 @@ static int __devexit adv7520_remove(struct i2c_client *client)
 		DEV_ERR("%s: No HDMI Device\n", __func__);
 		return -ENODEV;
 	}
+	wake_lock_destroy(&wlock);
 	return err;
 }
 
@@ -678,6 +704,8 @@ static int __init adv7520_init(void)
 		*hdtv_mux = 0x8000;
 		iounmap(hdtv_mux);
 	}
+	wake_lock_init(&wlock, WAKE_LOCK_IDLE, "hdmi_active");
+
 	return 0;
 
 init_exit:

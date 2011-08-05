@@ -138,7 +138,9 @@ static const char shortname[] = DRIVER_NAME;
 #define INFO(d, fmt, args...) \
 	dev_info(&(d)->cdev->gadget->dev , fmt , ## args)
 
-
+#ifdef CONFIG_USB_CSW_HACK
+static int write_error_after_csw_sent;
+#endif
 /*-------------------------------------------------------------------------*/
 
 /* SCSI device types */
@@ -1180,31 +1182,22 @@ static int do_write(struct fsg_dev *fsg)
 
 			/* If an error occurred, report it and its position */
 			if (nwritten < amount) {
-#ifdef CONFIG_USB_CSW_HACK
-				/*
-				 * If csw is already sent & write failure
-				 * occured, then detach the storage media
-				 * from the corresponding lun, and cable must
-				 * be disconnected to recover fom this error.
-				 */
-				if (csw_hack_sent) {
-					if (backing_file_is_open(curlun)) {
-						close_backing_file(fsg, curlun);
-						curlun->unit_attention_data =
-							SS_MEDIUM_NOT_PRESENT;
-					}
-					break;
-				}
-#endif
 				curlun->sense_data = SS_WRITE_ERROR;
 				curlun->sense_data_info = file_offset >>
 							curlun->shift_size;
 				curlun->info_valid = 1;
+#ifdef CONFIG_USB_CSW_HACK
+				write_error_after_csw_sent = 1;
+				goto write_error;
+#endif
 				break;
 			}
 
 #ifdef CONFIG_USB_CSW_HACK
+write_error:
 			if ((nwritten == amount) && !csw_hack_sent) {
+				if (write_error_after_csw_sent)
+					break;
 				/*
 				 * Check if any of the buffer is in the
 				 * busy state, if any buffer is in busy state,
@@ -1977,7 +1970,11 @@ static int send_status(struct fsg_dev *fsg)
 	 * writing on to storage media, need to set
 	 * residue to zero,assuming that write will succeed.
 	 */
-	csw->Residue = 0;
+	if (write_error_after_csw_sent) {
+		write_error_after_csw_sent = 0;
+		csw->Residue = cpu_to_le32(fsg->residue);
+	} else
+		csw->Residue = 0;
 #else
 	csw->Residue = cpu_to_le32(fsg->residue);
 #endif
@@ -2297,6 +2294,10 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				(7<<1) | (1<<4), 1,
 				"WRITE(6)")) == 0)
 			reply = do_write(fsg);
+#ifdef CONFIG_USB_CSW_HACK
+		else
+			write_error_after_csw_sent = 1;
+#endif
 		break;
 
 	case SC_WRITE_10:
@@ -2305,6 +2306,10 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				(1<<1) | (0xf<<2) | (3<<7), 1,
 				"WRITE(10)")) == 0)
 			reply = do_write(fsg);
+#ifdef CONFIG_USB_CSW_HACK
+		else
+			write_error_after_csw_sent = 1;
+#endif
 		break;
 
 	case SC_WRITE_12:
@@ -2313,6 +2318,10 @@ static int do_scsi_command(struct fsg_dev *fsg)
 				(1<<1) | (0xf<<2) | (0xf<<6), 1,
 				"WRITE(12)")) == 0)
 			reply = do_write(fsg);
+#ifdef CONFIG_USB_CSW_HACK
+		else
+			write_error_after_csw_sent = 1;
+#endif
 		break;
 #ifdef CONFIG_USB_MARLIN_SCSI_EXTENSIONS
 	case SC_REPORT_KEY:
@@ -2790,8 +2799,10 @@ static int fsg_main_thread(void *fsg_)
 		 * need to skip sending status once again if it is a
 		 * write scsi command.
 		 */
-		if (fsg->cmnd[0] == SC_WRITE_6  || fsg->cmnd[0] == SC_WRITE_10
-					|| fsg->cmnd[0] == SC_WRITE_12)
+		if (!(write_error_after_csw_sent) &&
+			(fsg->cmnd[0] == SC_WRITE_6
+			|| fsg->cmnd[0] == SC_WRITE_10
+			|| fsg->cmnd[0] == SC_WRITE_12))
 			continue;
 #endif
 		if (send_status(fsg))

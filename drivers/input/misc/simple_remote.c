@@ -13,7 +13,6 @@
  * of the License, or (at your option) any later version.
  */
 
-
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/workqueue.h>
@@ -32,7 +31,6 @@
 #include <linux/ctype.h>
 #include <linux/timer.h>
 #include <linux/kernel.h>
-#include <linux/spinlock.h>
 
 #include <linux/simple_remote.h>
 
@@ -151,6 +149,7 @@ struct simple_remote_driver {
 
 	atomic_t detection_in_progress;
 	atomic_t detect_cycle;
+	atomic_t initialized;
 
 	u8 pressed_button;
 	u8 nodetect_cycles;
@@ -183,7 +182,8 @@ static int simple_remote_attrs_set_data_buffer(char *buf, const int *array,
 	int buf_pos = 0;
 
 	for (j = 0; j < array_len; j++) {
-		buf_pos += sprintf(&buf[buf_pos], "%d ", array[j]);
+		buf_pos += snprintf(&buf[buf_pos], PAGE_SIZE - buf_pos,
+				"%d ", array[j]);
 
 		if (buf_pos >= PAGE_SIZE) {
 			pr_err("*** %s - Error! len (%d) > PAGE_SIZE\n",
@@ -590,8 +590,8 @@ static void simple_remote_close(struct input_dev *dev)
 static void simple_remote_plug_det_work(struct work_struct *work)
 {
 	u8 getgpiovalue;
-	unsigned int adc_value = 0;
-	unsigned int alt_adc_val = 0;
+	unsigned int adc_value = 2000;
+	unsigned int alt_adc_val = 2000;
 	enum dev_state state;
 
 	struct simple_remote_driver *jack =
@@ -604,33 +604,34 @@ static void simple_remote_plug_det_work(struct work_struct *work)
 	if (!getgpiovalue) {
 		jack->interface->enable_mic_bias(1);
 		jack->interface->read_hs_adc(&adc_value);
-		if ( 0 > jack->interface->enable_alternate_adc_mode(1))
-			dev_warn(jack->dev,
-				 "%s - Alternate ADC mode did not engage "
-				 "correctly. Unsupported headset may not be"
-				 "correctly detected!\n", __func__);
-		jack->interface->read_hs_adc(&alt_adc_val);
-		jack->interface->enable_mic_bias(0);
-		jack->interface->enable_alternate_adc_mode(0);
 
 		dev_dbg(jack->dev, "%s - adc_value = %d\n", __func__,
 			adc_value);
-		dev_dbg(jack->dev, "%s - alt_adc_val = %d\n", __func__,
-			alt_adc_val);
+		jack->interface->enable_mic_bias(0);
 	}
 
 	jack->new_accessory_state =
 		simple_remote_attrs_parse_accessory_type(
 			jack, adc_value, getgpiovalue);
 
-	state = simple_remote_attrs_parse_accessory_type(
-		jack, alt_adc_val, getgpiovalue);
-
 	/* performing CTIA detection */
 	if (!getgpiovalue && jack->new_accessory_state == DEVICE_HEADSET) {
 		dev_dbg(jack->dev,
 			"%s - Headset detected. Checking for unsupported\n",
 			__func__);
+		jack->interface->enable_mic_bias(1);
+		if (0 > jack->interface->enable_alternate_adc_mode(1))
+			dev_warn(jack->dev,
+				 "%s - Alternate ADC mode did not engage "
+				 "correctly. Unsupported headset may not be"
+				 "correctly detected!\n", __func__);
+		jack->interface->read_hs_adc(&alt_adc_val);
+		dev_dbg(jack->dev, "%s - alt_adc_val = %d\n", __func__,
+			alt_adc_val);
+		jack->interface->enable_mic_bias(0);
+		jack->interface->enable_alternate_adc_mode(0);
+		state = simple_remote_attrs_parse_accessory_type(
+			jack, alt_adc_val, getgpiovalue);
 		if (DEVICE_HEADPHONE == state) {
 			dev_info(jack->dev,
 				 "%s - CTIA headset detected", __func__);
@@ -646,8 +647,16 @@ static void simple_remote_plug_det_work(struct work_struct *work)
 		jack->num_headphone_detections++;
 	}
 
-	if (jack->new_accessory_state != DEVICE_HEADPHONE ||
-	    jack->num_headphone_detections >= MIN_NUM_HEADPHONE_DETECTIONS)
+	/*
+	 * Avoid the conflict between audio path changing and alternate
+	 * ADC reading.
+	 * Accessory state report to the upper layer is deferred until OMTP
+	 * detection cycle finishes when the accessory state is DEVICE_HEADSET.
+	 */
+	if (!(jack->new_accessory_state == DEVICE_HEADPHONE ||
+	    jack->new_accessory_state == DEVICE_HEADSET) ||
+	    jack->num_headphone_detections >= MIN_NUM_HEADPHONE_DETECTIONS ||
+	    jack->num_omtp_detections >= MIN_NUM_OMTP_DETECTIONS)
 		simple_remote_report_accessory_type(jack);
 
 	dev_vdbg(jack->dev, "%s - used detection cycles = %d\n", __func__,
@@ -733,9 +742,13 @@ static irqreturn_t simple_remote_button_irq_handler(int irq, void *data)
 
 	struct simple_remote_driver *jack = data;
 
-	dev_dbg(jack->dev, "Received a Button interrupt\n");
-
-	schedule_work(&jack->btn_det_work);
+	if (atomic_read(&jack->initialized)) {
+		dev_dbg(jack->dev, "Received a Button interrupt\n");
+		schedule_work(&jack->btn_det_work);
+	} else {
+		dev_dbg(jack->dev, "Received button IRQ before initialized "
+			"system. Discarding\n");
+	}
 
 	return IRQ_HANDLED;
 }
@@ -766,8 +779,6 @@ static int simple_remote_probe(struct platform_device *pdev)
 	int size;
 	void *v;
 	struct simple_remote_driver *jack;
-	unsigned long flags;
-	spinlock_t boot_lock = SPIN_LOCK_UNLOCKED;
 
 	dev_info(&pdev->dev, "**** Registering (headset) driver\n");
 
@@ -779,7 +790,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 	mutex_init(&jack->simple_remote_mutex);
 
 	if (!pdev->dev.platform_data)
-		goto err_system_init;
+		goto err_switch_dev_register;
 
 
 	size = sizeof(*jack->interface) / sizeof(void *);
@@ -787,7 +798,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 
 	for (; size > 0; size--)
 		if (v++ == NULL)
-			goto err_system_init;
+			goto err_switch_dev_register;
 
 	jack->interface = pdev->dev.platform_data;
 	jack->dev = &pdev->dev;
@@ -823,7 +834,7 @@ static int simple_remote_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(jack->dev,
 			"create_sysfs_interfaces for input failed\n");
-		goto err_allocate_input_dev;
+		goto err_switch_dev_register;
 	}
 
 	if (initialize_hardware(jack))
@@ -850,13 +861,21 @@ static int simple_remote_probe(struct platform_device *pdev)
 	input_set_drvdata(jack->indev, jack);
 	platform_set_drvdata(pdev, jack);
 
+	ret = input_register_device(jack->indev);
+	if (ret) {
+		dev_err(jack->dev, "input_register_device for input device "
+			"failed\n");
+		input_free_device(jack->indev);
+		goto err_register_input_dev;
+	}
+
 	/* Create input device for application key events. */
 	jack->indev_appkey = input_allocate_device();
 	if (!jack->indev_appkey) {
 		ret = -ENOMEM;
 		dev_err(jack->dev, "Failed to allocate application key input "
 			"device\n");
-		goto err_allocate_appkey_dev;
+		goto err_allocate_input_appkey_dev;
 	}
 
 	jack->indev_appkey->name = SIMPLE_REMOTE_APPKEY_NAME;
@@ -868,48 +887,26 @@ static int simple_remote_probe(struct platform_device *pdev)
 
 	input_set_drvdata(jack->indev_appkey, jack);
 
-	/* Need to lock the registration of input devices with a spinlock.
-	 * This will make sure that no interrupts are received while we are
-	 * registering these input devices. If one is opened before the other
-	 * is allocated, an interrupt may cause a NULL pointer access in the
-	 * function report_button_id(). Event though we disable interrupts here
-	 * this is generally faster than adding if's to the function above. */
-	spin_lock_irqsave(&boot_lock, flags);
-	ret = input_register_device(jack->indev);
-	if (ret) {
-		dev_err(jack->dev,
-			"input_register_device for input device failed");
-		ret = -ENODEV;
-		spin_unlock_irqrestore(&boot_lock, flags);
-		goto err_register_input_dev;
-	}
-
 	ret = input_register_device(jack->indev_appkey);
 	if (ret) {
-		dev_err(jack->dev,
-			"input_register_device for application key failed");
-		ret = -ENODEV;
-		input_unregister_device(jack->indev);
-		input_free_device(jack->indev_appkey);
-		spin_unlock_irqrestore(&boot_lock, flags);
-		goto err_allocate_input_dev;
+		dev_err(jack->dev, "input_register_device for application key "
+				"input device failed\n");
+		goto err_register_input_appkey_dev;
 	}
-	spin_unlock_irqrestore(&boot_lock, flags);
 
 	dev_info(jack->dev, "***** Successfully registered\n");
 
+	atomic_set(&jack->initialized, 1);
+
 	return ret;
 
-err_register_input_dev:
+err_register_input_appkey_dev:
 	input_free_device(jack->indev_appkey);
-err_allocate_appkey_dev:
-	input_free_device(jack->indev);
+err_allocate_input_appkey_dev:
+	input_unregister_device(jack->indev);
+err_register_input_dev:
 err_allocate_input_dev:
-	switch_dev_unregister(&jack->swdev);
 err_switch_dev_register:
-	del_timer(&jack->plug_det_timer);
-err_system_init:
-	mutex_destroy(&jack->simple_remote_mutex);
 	dev_err(&pdev->dev, "***** Failed to initialize\n");
 	kzfree(jack);
 
@@ -931,7 +928,6 @@ static int simple_remote_remove(struct platform_device *pdev)
 	input_unregister_device(jack->indev_appkey);
 	input_unregister_device(jack->indev);
 	switch_dev_unregister(&jack->swdev);
-	mutex_destroy(&jack->simple_remote_mutex);
 	kzfree(jack);
 
 	return 0;

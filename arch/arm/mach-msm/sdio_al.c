@@ -445,8 +445,6 @@ struct sdio_al {
 	unsigned int clock;
 
 	unsigned int is_suspended;
-
-	int is_err_printed;
 };
 
 /** The driver context */
@@ -463,17 +461,18 @@ static u32 remove_handled_rx_packet(struct sdio_channel *ch);
 static int set_pipe_threshold(int pipe_index, int threshold);
 static int sdio_al_wake_up(u32 enable_wake_up_func);
 
-#define IS_ERR(func, ret)						\
-	do {								\
-		if (sdio_al->is_err) {					\
-			if (!sdio_al->is_err_printed) {			\
-				pr_err(MODULE_NAME			\
-					":In Error state, ignore %s\n",	\
-					func);				\
-				sdio_al->is_err_printed = true;		\
-			}						\
-			return ret;					\
-		}							\
+#define SDIO_AL_ERR(func)					\
+	do {							\
+		printk_once(KERN_ERR MODULE_NAME		\
+				":In Error state, ignore %s "	\
+				"(%d,%d,%d,%d,%d,%d)\n",	\
+				func,				\
+				sdio_al->channel[0].total_rx_bytes, \
+				sdio_al->channel[0].total_tx_bytes, \
+				sdio_al->channel[1].total_rx_bytes, \
+				sdio_al->channel[1].total_tx_bytes, \
+				sdio_al->channel[2].total_rx_bytes, \
+				sdio_al->channel[2].total_tx_bytes);\
 	} while (0)
 
 
@@ -553,7 +552,10 @@ static int read_mailbox(int from_isr)
 	u32 underflow_pipe = 0;
 	u32 thresh_intr_mask = 0;
 
-	IS_ERR(__func__, 0);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return 0;
+	}
 
 	pr_debug(MODULE_NAME ":start %s from_isr = %d.\n", __func__, from_isr);
 
@@ -723,7 +725,14 @@ static int read_mailbox(int from_isr)
 		/* Disable clocks here */
 		host->ios.clock = 0;
 		host->ops->set_ios(host, &host->ios);
-		pr_info(MODULE_NAME ":Finished sleep sequence. Sleep now.\n");
+		pr_info(MODULE_NAME
+			":Finished sleep sequence (%d,%d,%d,%d,%d,%d)\n",
+			sdio_al->channel[0].total_rx_bytes,
+			sdio_al->channel[0].total_tx_bytes,
+			sdio_al->channel[1].total_rx_bytes,
+			sdio_al->channel[1].total_tx_bytes,
+			sdio_al->channel[2].total_rx_bytes,
+			sdio_al->channel[2].total_tx_bytes);
 		/* Release wakelock */
 		wake_unlock(&sdio_al->wake_lock);
 	}
@@ -1233,7 +1242,8 @@ static int sdio_al_enable_func_retry(struct sdio_func *func, const char *name)
 	for (i = 0; i < 200; i++) {
 		ret = sdio_enable_func(func);
 		if (ret) {
-			pr_err(MODULE_NAME ":retry enable %s func#%d red=%d\n",
+			pr_debug(MODULE_NAME ":retry enable %s func#%d "
+					     "ret=%d\n",
 					 name, func->num, ret);
 			msleep(10);
 		} else
@@ -1278,7 +1288,7 @@ static int open_channel(struct sdio_channel *ch)
 	/* Init SDIO Function */
 	ret = sdio_al_enable_func_retry(ch->func, ch->name);
 	if (ret) {
-		pr_info(MODULE_NAME ":sdio_enable_func() err=%d\n", -ret);
+		pr_err(MODULE_NAME ":sdio_enable_func() err=%d\n", -ret);
 		goto exit_err;
 	}
 
@@ -1393,7 +1403,10 @@ static int sdio_al_wake_up(u32 enable_wake_up_func)
 	unsigned long time_to_wait;
 	struct mmc_host *host = wk_func->card->host;
 
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	/* Wake up sequence */
 	wake_lock(&sdio_al->wake_lock);
@@ -1701,7 +1714,10 @@ int sdio_open(const char *name, struct sdio_channel **ret_ch, void *priv,
 		return -ENODEV;
 	}
 
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	if (!sdio_al->is_ready) {
 		ret = sdio_al_setup();
@@ -1820,7 +1836,10 @@ int sdio_read(struct sdio_channel *ch, void *data, int len)
 	   sleep */
 	BUG_ON(sdio_al->is_ok_to_sleep);
 
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	if (!ch->is_open) {
 		pr_info(MODULE_NAME ":reading from closed channel %s\n",
@@ -1832,6 +1851,8 @@ int sdio_read(struct sdio_channel *ch, void *data, int len)
 		ch->name, len, ch->read_avail);
 
 	restart_inactive_time();
+
+	sdio_claim_host(sdio_al->card->sdio_func[0]);
 
 	if ((ch->is_packet_mode) && (len != ch->read_avail)) {
 		pr_info(MODULE_NAME ":sdio_read ch %s len != read_avail\n",
@@ -1845,11 +1866,18 @@ int sdio_read(struct sdio_channel *ch, void *data, int len)
 		return -ENOMEM;
 	}
 
-	sdio_claim_host(sdio_al->card->sdio_func[0]);
 	ret = sdio_memcpy_fromio(ch->func, data, PIPE_RX_FIFO_ADDR, len);
 
-	if (ret)
-		pr_info(MODULE_NAME ":sdio_read err=%d\n", -ret);
+	if (ret) {
+		pr_info(MODULE_NAME ":sdio_read err=%d (%d,%d,%d,%d,%d,%d)\n",
+			-ret,
+			sdio_al->channel[0].total_rx_bytes,
+			sdio_al->channel[0].total_tx_bytes,
+			sdio_al->channel[1].total_rx_bytes,
+			sdio_al->channel[1].total_tx_bytes,
+			sdio_al->channel[2].total_rx_bytes,
+			sdio_al->channel[2].total_tx_bytes);
+	}
 
 	/* Remove handled packet from the list regardless if ret is ok */
 	if (ch->is_packet_mode)
@@ -1882,7 +1910,10 @@ int sdio_write(struct sdio_channel *ch, const void *data, int len)
 	BUG_ON(ch->signature != SDIO_AL_SIGNATURE);
 	WARN_ON(len > ch->write_avail);
 
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	if (!ch->is_open) {
 		pr_info(MODULE_NAME ":writing to closed channel %s\n",
@@ -1918,7 +1949,14 @@ int sdio_write(struct sdio_channel *ch, const void *data, int len)
 		ch->name, len, ch->write_avail, ch->total_tx_bytes);
 
 	if (ret) {
-		pr_info(MODULE_NAME ":sdio_write err=%d\n", -ret);
+		pr_info(MODULE_NAME ":sdio_write err=%d (%d,%d,%d,%d,%d,%d)\n",
+			-ret,
+			sdio_al->channel[0].total_rx_bytes,
+			sdio_al->channel[0].total_tx_bytes,
+			sdio_al->channel[1].total_rx_bytes,
+			sdio_al->channel[1].total_tx_bytes,
+			sdio_al->channel[2].total_rx_bytes,
+			sdio_al->channel[2].total_tx_bytes);
 	} else {
 		/* Round up to whole buffer size */
 		len = ROUND_UP(len, ch->peer_tx_buf_size);
@@ -1946,7 +1984,10 @@ int sdio_set_write_threshold(struct sdio_channel *ch, int threshold)
 	int ret;
 
 	BUG_ON(ch->signature != SDIO_AL_SIGNATURE);
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	sdio_claim_host(sdio_al->card->sdio_func[0]);
 	ret = sdio_al_wake_up(1);
@@ -1977,7 +2018,10 @@ int sdio_set_read_threshold(struct sdio_channel *ch, int threshold)
 	int ret;
 
 	BUG_ON(ch->signature != SDIO_AL_SIGNATURE);
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	sdio_claim_host(sdio_al->card->sdio_func[0]);
 	if (sdio_al->is_ok_to_sleep) {
@@ -2010,7 +2054,10 @@ int sdio_set_poll_time(struct sdio_channel *ch, int poll_delay_msec)
 	int ret;
 
 	BUG_ON(ch->signature != SDIO_AL_SIGNATURE);
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	if (poll_delay_msec <= 0 || poll_delay_msec > INACTIVITY_TIME_MSEC)
 		return -EPERM;
@@ -2167,7 +2214,10 @@ static int sdio_al_sdio_suspend(struct device *dev)
 	pr_info(MODULE_NAME ":sdio_al_sdio_suspend for func %d\n",
 		func->num);
 
-	IS_ERR(__func__, -ENODEV);
+	if (sdio_al->is_err) {
+		SDIO_AL_ERR(__func__);
+		return -ENODEV;
+	}
 
 	sdio_claim_host(sdio_al->card->sdio_func[0]);
 
@@ -2268,7 +2318,6 @@ static int __init sdio_al_init(void)
 	set_default_channels_config();
 
 	sdio_al->is_err = false;
-	sdio_al->is_err_printed = false;
 
 	ret = platform_driver_register(&msm_sdio_al_driver);
 	if (ret) {
