@@ -1141,11 +1141,9 @@ static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this)
 	set_bit(BTN_2, input_dev->keybit);
 
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X,
-//		pdata->x_min, pdata->x_max, 0, 0);
-		0, 480, 0, 0);
+		pdata->x_min, pdata->x_max, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
-//		pdata->y_min, pdata->y_max, 0, 0);
-		0, 854, 0, 0);
+		pdata->y_min, pdata->y_max, 0, 0);
 	input_set_abs_params(this->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	set_bit(ABS_MT_TRACKING_ID, this->input->absbit);
 
