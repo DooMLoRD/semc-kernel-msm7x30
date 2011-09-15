@@ -1,9 +1,7 @@
 FXP CM Kernel for Xperia 2011 line
 
 planed features
-
 OTG
-BFQ I/O scheduler
 VDD sysffs interface
 OC/UV
 cleanup and slimdown configs
@@ -16,3 +14,9 @@ Smartass V2
 Interactive
 MiniMax
 Scarry
+
+schedulers:
+BFQ I/O
+
+
+Maintainers Jerpelea,Bin4ry,Defeder,Doomlord
