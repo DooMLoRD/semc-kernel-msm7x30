@@ -2,13 +2,17 @@ FXP CM Kernel for Xperia 2011 line
 
 planed features
 
-Smartasss V2 governor
-Interactive governor
 OTG
 BFQ I/O scheduler
 VDD sysffs interface
 OC/UV
-cleanup and slimdown
+cleanup and slimdown configs
 
-implemented features
+Implemented features
 
+Governors:
+Smartass
+Smartass V2
+Interactive
+MiniMax
+Scarry
