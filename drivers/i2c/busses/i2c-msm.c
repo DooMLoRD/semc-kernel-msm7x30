@@ -239,7 +239,7 @@ msm_i2c_interrupt(int irq, void *devid)
 			 */
 			if ((status & I2C_STATUS_LOW_CLK_STATE) ==
 					I2C_STATUS_LOW_CLK_STATE)
-				udelay((dev->one_bit_t >> 1) + 1);
+				usleep((dev->one_bit_t >> 1) + 1);
 			writel(data, dev->base + I2C_WRITE_DATA);
 			dev->pos++;
 			dev->cnt--;
@@ -327,28 +327,28 @@ msm_i2c_recover_bus_busy(struct msm_i2c_dev *dev, struct i2c_adapter *adap)
 
 	/* If both gpios are the same and zero, they are not properly set */
 	if (gpio_clk == 0 && gpio_dat == 0) {
-		udelay(10);
+		usleep(10);
 	} else {
 		for (i = 0; i < 9; i++) {
 			if (gpio_get_value(gpio_dat) && gpio_clk_status)
 				break;
 			gpio_direction_output(gpio_clk, 0);
-			udelay(5);
+			usleep(5);
 			gpio_direction_output(gpio_dat, 0);
-			udelay(5);
+			usleep(5);
 			gpio_direction_input(gpio_clk);
-			udelay(5);
+			usleep(5);
 			if (!gpio_get_value(gpio_clk))
 				usleep_range(20, 30);
 			if (!gpio_get_value(gpio_clk))
 				msleep(10);
 			gpio_clk_status = gpio_get_value(gpio_clk);
 			gpio_direction_input(gpio_dat);
-			udelay(5);
+			usleep(5);
 		}
 	}
 	dev->pdata->msm_i2c_config_gpio(adap->nr, 1);
-	udelay(10);
+	usleep(10);
 
 	status = readl(dev->base + I2C_STATUS);
 	if (!(status & I2C_STATUS_BUS_ACTIVE)) {

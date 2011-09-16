@@ -2248,14 +2248,14 @@ int zeus_wifi_power(int on)
 {
 	printk(KERN_INFO "%s: %d\n", __func__, on);
 	gpio_set_value(WIFI_GPIO_EN, on);
-	mdelay(100);
+	msleep(100);
 	return 0;
 };
 
 int zeus_wifi_reset(int on)
 {
 	printk(KERN_INFO "%s: %d\n", __func__, on);
-	mdelay(100);
+	msleep(100);
 	return 0;
 };
 

@@ -348,12 +348,12 @@ static int fpc_pin_read(int pin)
 		pr_err("%s: failed to set gpio input\n", __func__);
 		return rc;
 	}
-	udelay(20);
+	usleep(20);
 	val = gpio_get_value(pin);
 	rc = gpio_tlmm_config(GPIO_CFG(pin, 0, GPIO_CFG_OUTPUT,
 		GPIO_CFG_NO_PULL, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
 	if (!rc) {
-		udelay(20);
+		usleep(20);
 		gpio_set_value(pin, 0);
 	} else {
 		pr_err("%s: failed to set gpio output\n", __func__);
@@ -2090,7 +2090,7 @@ static int hdmi_sii_panel_power(int on)
 		return rc;
 	}
 
-	mdelay(5);		/* ensure power is stable */
+	msleep(5);		/* ensure power is stable */
 
 	return rc;
 }
@@ -2145,11 +2145,11 @@ static void semc_mogami_lcd_power_on(u8 delay1, u8 delay2, u8 delay3)
 			GPIO_CFG_ENABLE );
 	gpio_set_value(GPIO_MSM_MDDI_XRES,0);
 	semc_mogami_lcd_regulators_on();
-	mdelay(delay1);
+	msleep(delay1);
 	gpio_set_value(GPIO_MSM_MDDI_XRES,0);
-	mdelay(delay2);
+	msleep(delay2);
 	gpio_set_value(GPIO_MSM_MDDI_XRES,1);
-	mdelay(delay3);
+	msleep(delay3);
 }
 #endif  /* (CONFIG_FB_MSM_MDDI_SONY_HVGA_LCD) ||
 	(CONFIG_FB_MSM_MDDI_HITACHI_HVGA_LCD) ||
@@ -2490,7 +2490,7 @@ static int cyttsp_xres(void)
 		       __func__, rc);
 		return -EIO;
 	}
-	udelay(250);
+	usleep(250);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_RESET, polarity);
 	return 0;
 }
@@ -2532,7 +2532,7 @@ static int cyttsp_wakeup(void)
 	}
 	msleep(10);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 0);
-	udelay(250);
+	usleep(250);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 1);
 	printk(KERN_INFO "%s: wakeup\n", __func__);
 	ret = gpio_direction_input(CYPRESS_TOUCH_GPIO_IRQ);
@@ -2683,7 +2683,7 @@ static void clearpad_vreg_off(void)
 
 	vreg_helper_off(VREG_L20);
 	for (i = 0; i < 500; i++)
-		udelay(1000);
+		usleep(1000);
 }
 
 static struct clearpad_platform_data clearpad_platform_data = {
@@ -2827,7 +2827,7 @@ int lm356x_request_gpio_pins(void)
 
 	gpio_set_value(LM356X_HW_RESET_GPIO, 1);
 
-	udelay(20);
+	usleep(20);
 	return result;
 }
 
@@ -4249,9 +4249,9 @@ static void wlan_init_seq(void)
 	/* Set device in low VIO-leakage state according to spec */
 	/* This is done by toggle WLAN_EN OFF/ON/OFF (pulse width > 10ms) */
 	gpio_set_value(57, 0);
-	mdelay(1);
+	msleep(1);
 	gpio_set_value(57, 1);
-	mdelay(12);
+	msleep(12);
 	gpio_set_value(57, 0);
 }
 

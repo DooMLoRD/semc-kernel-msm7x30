@@ -112,7 +112,7 @@ static int AKI2C_RxData(char *rxData, int length)
 	for (loop_i = 0; loop_i < AKM8975_RETRY_COUNT; loop_i++) {
 		if (i2c_transfer(this_client->adapter, msgs, 2) > 0)
 			break;
-		mdelay(10);
+		msleep(10);
 	}
 
 	if (loop_i >= AKM8975_RETRY_COUNT) {
@@ -151,7 +151,7 @@ static int AKI2C_TxData(char *txData, int length)
 	for (loop_i = 0; loop_i < AKM8975_RETRY_COUNT; loop_i++) {
 		if (i2c_transfer(this_client->adapter, msg, 1) > 0)
 			break;
-		mdelay(10);
+		msleep(10);
 	}
 
 	if (loop_i >= AKM8975_RETRY_COUNT) {
@@ -236,7 +236,7 @@ static int AKECS_SetMode(char mode)
 	case AK8975_MODE_POWERDOWN:
 		ret = AKECS_SetMode_PowerDown();
 		/* wait at least 100us after changing mode */
-		udelay(100);
+		usleep(100);
 		break;
 	default:
 		AKMDBG("%s: Unknown mode(%d)", __func__, mode);
