@@ -199,7 +199,7 @@ static int AKECS_Init(void)
 static void AKECS_Reset(void)
 {
 	gpio_set_value(pdata->reset, 0);
-	usleep(120);
+	udelay(120);
 	gpio_set_value(pdata->reset, 1);
 }
 

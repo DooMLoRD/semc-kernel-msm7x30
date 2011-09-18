@@ -503,7 +503,7 @@ void arch_idle(void)
 	if (mode->latency >= latency_qos) {
 		/* no time even for SWFI */
 		while (!msm_irq_pending())
-			usleep(1);
+			udelay(1);
 #ifdef CONFIG_MSM_IDLE_STATS
 		exit_stat = MSM_PM_STAT_IDLE_SPIN;
 #endif
@@ -521,7 +521,7 @@ void arch_idle(void)
 #endif
 			goto abort_idle;
 		}
-		usleep(1);
+		udelay(1);
 	}
 	if (sleep_time < msm_pm_idle_sleep_min_time || !allow_sleep) {
 		unsigned long saved_rate;
@@ -536,7 +536,7 @@ void arch_idle(void)
 #endif
 		} else {
 			while (!msm_irq_pending())
-				usleep(1);
+				udelay(1);
 #ifdef CONFIG_MSM_IDLE_STATS
 			exit_stat = MSM_PM_STAT_IDLE_SPIN;
 #endif
