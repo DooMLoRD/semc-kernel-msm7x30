@@ -174,8 +174,10 @@
 /* CM Torch Constants */
 #define LM356X_CM_TORCH_OFF              0
 #define LM356X_CM_TORCH_ON               1
-#define LM356X_CM_TORCH_DEATHRAY         2
+#define LM356X_CM_TORCH_ON_HIGH          2
+#define LM356X_CM_TORCH_ON_DEATHRAY      3
 #define LM356X_CM_TORCH_CURRENT_NORMAL   187500
+#define LM356X_CM_TORCH_CURRENT_HIGH     343750
 #define LM356X_CM_TORCH_CURRENT_DEATHRAY 500000
 
 struct led_limits {
@@ -977,11 +979,15 @@ static ssize_t attr_cm_torch_enable_store(struct device *dev,
             torch_mode = 0;
             torch_current = LM356X_CM_TORCH_CURRENT_NORMAL;
             break;
-        case LM356X_CM_TORCH_ON: // ON
+        case LM356X_CM_TORCH_ON:
             torch_mode = 1;
             torch_current = LM356X_CM_TORCH_CURRENT_NORMAL;
             break;
-        case LM356X_CM_TORCH_DEATHRAY: // DEATHRAY
+        case LM356X_CM_TORCH_ON_HIGH:
+            torch_mode = 1;
+            torch_current = LM356X_CM_TORCH_CURRENT_HIGH;
+            break;
+        case LM356X_CM_TORCH_ON_DEATHRAY:
             torch_mode = 1;
             torch_current = LM356X_CM_TORCH_CURRENT_DEATHRAY;
             break;
