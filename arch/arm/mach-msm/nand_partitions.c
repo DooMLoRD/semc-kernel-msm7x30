@@ -114,6 +114,31 @@ struct flash_partition_table {
 	struct flash_partition_entry part_entry[16];
 };
 
+static struct mtd_partition nand_partitions[] = {
+        {
+                .name = "appslog",
+                .size =   0x0000042c >> 1,
+                .offset = 0x00001888 >> 1,
+        }, {
+                .name = "cache",
+                .size =   0x0000032c >> 1,
+                .offset = 0x00001cb4 >> 1,
+        }, {
+                .name = "system",
+                .size =   0x000009c4 >> 1,
+                .offset = 0x000002e4 >> 1,
+        }, {
+                .name = "userdata",
+                .size =   0x00000be0 >> 1,
+                .offset = 0x00000ca8 >> 1,
+        }, {
+                .name = "boot",
+                .size = 0x00000064,
+                .offset = 0x00000280,
+                .mask_flags = MTD_WRITEABLE, /* force read-only */
+        }
+};
+
 static int get_nand_partitions(void)
 {
 	struct flash_partition_table *partition_table;
@@ -123,7 +148,9 @@ static int get_nand_partitions(void)
 	int part;
 
 	if (msm_nand_data.nr_parts)
-		return 0;
+    msm_nand_data.nr_parts = ARRAY_SIZE(nand_partitions);
+    msm_nand_data.parts = nand_partitions;
+	return 0;
 
 	partition_table = (struct flash_partition_table *)
 	    smem_alloc(SMEM_AARM_PARTITION_TABLE,
@@ -132,7 +159,7 @@ static int get_nand_partitions(void)
 	if (!partition_table) {
 		printk(KERN_WARNING "%s: no flash partition table in shared "
 		       "memory\n", __func__);
-		return -ENOENT;
+	return -ENOENT;
 	}
 
 	if ((partition_table->magic1 != (u32) FLASH_PART_MAGIC1) ||
