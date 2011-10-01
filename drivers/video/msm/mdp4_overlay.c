@@ -116,14 +116,10 @@ void mdp4_overlay_dmae_cfg(struct msm_fb_data_type *mfd, int atv)
 	else
 		dmae_cfg_reg = 0;
 
-#ifndef CONFIG_MACH_SEMC_ZEUS
-	dmae_cfg_reg |= DMA_PACK_PATTERN_BGR;
-#else
 	if (mfd->fb_imgType == MDP_BGR_565)
 		dmae_cfg_reg |= DMA_PACK_PATTERN_BGR;
 	else
 		dmae_cfg_reg |= DMA_PACK_PATTERN_RGB;
-#endif
 
 
 	if (mfd->panel_info.bpp == 18) {
@@ -181,14 +177,10 @@ void mdp4_overlay_dmap_cfg(struct msm_fb_data_type *mfd, int lcdc)
 
 	dma2_cfg_reg = DMA_DITHER_EN;
 
-#ifndef CONFIG_MACH_SEMC_ZEUS
-	dma2_cfg_reg |= DMA_PACK_PATTERN_BGR;
-#else
 	if (mfd->fb_imgType == MDP_BGR_565)
 		dma2_cfg_reg |= DMA_PACK_PATTERN_BGR;
 	else
 		dma2_cfg_reg |= DMA_PACK_PATTERN_RGB;
-#endif
 
 
 	if (mfd->panel_info.bpp == 18) {
