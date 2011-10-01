@@ -102,10 +102,10 @@ static struct pll pll2_tbl[] = {
 	{  68, 1, 3, 0 }, /* 1305 MHz */
 	{  73, 1, 3, 0 }, /* 1401 MHz */
 	{  78, 1, 3, 0 }, /* 1516 MHz */
-//	{  83, 1, 3, 0 }, /* 1612 MHz */
-//	{  88, 1, 3, 0 }, /* 1708 MHz */
-//	{  93, 1, 3, 0 }, /* 1804 MHz */
-//	{  98, 1, 3, 0 }, /* 1900 MHz */
+	{  83, 1, 3, 0 }, /* 1612 MHz */
+	{  88, 1, 3, 0 }, /* 1708 MHz */
+	{  93, 1, 3, 0 }, /* 1804 MHz */
+	{  98, 1, 3, 0 }, /* 1900 MHz */
 };
 
 /* Use negative numbers for sources that can't be enabled/disabled */
@@ -136,18 +136,18 @@ static struct clkctl_acpu_speed acpu_freq_tbl[] = {
 	 * AXI has MSMC1 implications. See above.
 	 */
 	{ 1, 806400,  PLL_2, 3, 0, UINT_MAX, 1100, VDD_RAW(1100), &pll2_tbl[0]},
-	{ 1, 921600,  PLL_2, 3, 0, UINT_MAX, 1150, VDD_RAW(1150), &pll2_tbl[1]},
+	{ 1, 921600,  PLL_2, 3, 0, UINT_MAX, 1100, VDD_RAW(1150), &pll2_tbl[1]},
 	{ 1, 1024000, PLL_2, 3, 0, UINT_MAX, 1200, VDD_RAW(1200), &pll2_tbl[2]},
 	// DooMLoRD:[START]: added some frequencies
 	{ 1, 1113000, PLL_2, 3, 0, UINT_MAX, 1200, VDD_RAW(1200), &pll2_tbl[3]},
-	{ 1, 1209600, PLL_2, 3, 0, UINT_MAX, 1200, VDD_RAW(1200), &pll2_tbl[4]},
+	{ 1, 1209600, PLL_2, 3, 0, UINT_MAX, 1200, VDD_RAW(1250), &pll2_tbl[4]},
 	{ 1, 1305600, PLL_2, 3, 0, UINT_MAX, 1250, VDD_RAW(1250), &pll2_tbl[5]},
 	{ 1, 1401600, PLL_2, 3, 0, UINT_MAX, 1250, VDD_RAW(1250), &pll2_tbl[6]},
-	{ 1, 1516800, PLL_2, 3, 0, UINT_MAX, 1300, VDD_RAW(1300), &pll2_tbl[7]},
-//	{ 1, 1612800, PLL_2, 3, 0, UINT_MAX, 1300, VDD_RAW(1300), &pll2_tbl[8]},
-//	{ 1, 1708800, PLL_2, 3, 0, UINT_MAX, 1350, VDD_RAW(1350), &pll2_tbl[9]},
-//	{ 1, 1804800, PLL_2, 3, 0, UINT_MAX, 1400, VDD_RAW(1400), &pll2_tbl[10]},
-//	{ 1, 1900800, PLL_2, 3, 0, UINT_MAX, 1475, VDD_RAW(1475), &pll2_tbl[11]},
+	{ 1, 1516800, PLL_2, 3, 0, UINT_MAX, 1300, VDD_RAW(1250), &pll2_tbl[7]},
+	{ 0, 1612800, PLL_2, 3, 0, UINT_MAX, 1300, VDD_RAW(1300), &pll2_tbl[8]},
+	{ 0, 1708800, PLL_2, 3, 0, UINT_MAX, 1350, VDD_RAW(1350), &pll2_tbl[9]},
+	{ 0, 1804800, PLL_2, 3, 0, UINT_MAX, 1400, VDD_RAW(1400), &pll2_tbl[10]},
+	{ 0, 1900800, PLL_2, 3, 0, UINT_MAX, 1475, VDD_RAW(1450), &pll2_tbl[11]},
 	// DooMLoRD:[ END ]: added some frequencies
 	{ 0 }
 };
