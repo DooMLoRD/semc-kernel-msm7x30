@@ -133,8 +133,8 @@ static struct mtd_partition nand_partitions[] = {
                 .offset = 0x00000ca8 >> 1,
         }, {
                 .name = "boot",
-                .size = 0x00000064,
-                .offset = 0x00000280,
+                .size =   0x00000064 >> 1,
+                .offset = 0x00000280 >> 1,
                 .mask_flags = MTD_WRITEABLE, /* force read-only */
         }
 };
@@ -148,8 +148,8 @@ static int get_nand_partitions(void)
 	int part;
 
 	if (msm_nand_data.nr_parts)
-    msm_nand_data.nr_parts = ARRAY_SIZE(nand_partitions);
-    msm_nand_data.parts = nand_partitions;
+	msm_nand_data.nr_parts = ARRAY_SIZE(nand_partitions);
+	msm_nand_data.parts = nand_partitions;
 	return 0;
 
 	partition_table = (struct flash_partition_table *)
