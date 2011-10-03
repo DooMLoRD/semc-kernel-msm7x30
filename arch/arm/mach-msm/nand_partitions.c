@@ -116,25 +116,25 @@ struct flash_partition_table {
 
 static struct mtd_partition nand_partitions[] = {
         {
+                .name = "system",
+                .size =   0x00000c80,
+                .offset = 0x000002f4,
+        }, {
                 .name = "appslog",
-                .size =   0x0000042c >> 1,
-                .offset = 0x00001888 >> 1,
+                .size =   0x00000030,
+                .offset = 0x00000f74,
         }, {
                 .name = "cache",
-                .size =   0x0000032c >> 1,
-                .offset = 0x00001cb4 >> 1,
-        }, {
-                .name = "system",
-                .size =   0x000009c4 >> 1,
-                .offset = 0x000002e4 >> 1,
+                .size =   0x0000032c,
+                .offset = 0x00000fa4,
         }, {
                 .name = "userdata",
-                .size =   0x00000be0 >> 1,
-                .offset = 0x00000ca8 >> 1,
+                .size =   0x00000d20,
+                .offset = 0x000012d0,
         }, {
                 .name = "boot",
-                .size =   0x00000064 >> 1,
-                .offset = 0x00000280 >> 1,
+                .size =   0x00000064,
+                .offset = 0x00000280,
                 .mask_flags = MTD_WRITEABLE, /* force read-only */
         }
 };
