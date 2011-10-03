@@ -82,6 +82,13 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 		entry++;
 		ptn++;
 	}
+	 ptn = &msm_nand_partitions[count];
+	 ptn->name ="boot";
+	 ptn->offset = 0x00000280;
+	 ptn->size = 0x00000064;
+//	 ptn->ecclayout = mtd->ecclayout;
+	 printk("Boot mtd partition '%s' created @%llx (%llu)\n", ptn->name, ptn->offset, ptn->size);
+	 count++;
 
 	msm_nand_data.nr_parts = count;
 	msm_nand_data.parts = msm_nand_partitions;
@@ -114,31 +121,6 @@ struct flash_partition_table {
 	struct flash_partition_entry part_entry[16];
 };
 
-static struct mtd_partition nand_partitions[] = {
-        {
-                .name = "system",
-                .size =   0x00000c80,
-                .offset = 0x000002f4,
-        }, {
-                .name = "appslog",
-                .size =   0x00000030,
-                .offset = 0x00000f74,
-        }, {
-                .name = "cache",
-                .size =   0x0000032c,
-                .offset = 0x00000fa4,
-        }, {
-                .name = "userdata",
-                .size =   0x00000d20,
-                .offset = 0x000012d0,
-        }, {
-                .name = "boot",
-                .size =   0x00000064,
-                .offset = 0x00000280,
-                .mask_flags = MTD_WRITEABLE, /* force read-only */
-        }
-};
-
 static int get_nand_partitions(void)
 {
 	struct flash_partition_table *partition_table;
@@ -148,8 +130,6 @@ static int get_nand_partitions(void)
 	int part;
 
 	if (msm_nand_data.nr_parts)
-	msm_nand_data.nr_parts = ARRAY_SIZE(nand_partitions);
-	msm_nand_data.parts = nand_partitions;
 	return 0;
 
 	partition_table = (struct flash_partition_table *)
