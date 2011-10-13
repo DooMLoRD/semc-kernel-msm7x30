@@ -1,22 +1,42 @@
-FXP CM Kernel for Xperia 2011 line
+DooMKernel (CM7) for Xperia 2011 line based on FXP CM Kernel for Xperia 2011 line
 
-planed features
-OTG
-VDD sysffs interface
-OC/UV
-cleanup and slimdown configs
-
-Implemented features
-
-Governors:
-Smartass
-Smartass V2
-Interactive
-MiniMax
-Scarry
-
-schedulers:
-BFQ I/O
+https://github.com/freexperia/semc-kernel-msm7x30
 
 
-Maintainers Jerpelea,Bin4ry,Defeder,Doomlord
+kernel configs:
+---------------
+
+[fxp_anzu_defconfig]
+Device   : Xperia Arc
+Model No.: LT15 / LT18
+Codename : anzu
+
+[fxp_zeus_defconfig]
+Device   : Xperia Play
+Model No.: R800
+Codename : zeus
+
+[fxp_hallon_defconfig]
+Device   : Xperia Neo
+Model No.: MT15
+Codename : hallon
+
+[fxp_mango_defconfig]
+Device   : Xperia Mini Pro
+Model No.: SK17
+Codename : mango
+
+[fxp_smultron_defconfig]
+Device   : Xperia Mini
+Model No.: ST15
+Codename : smultron
+
+[fxp_urushi_defconfig]
+Device   : Xperia Ray
+Model No.: ST18
+Codename : urushi
+
+[fxp_iyokan_defconfig]
+Device   : Xperia Pro
+Model No.: MK16
+Codename : iyokan
