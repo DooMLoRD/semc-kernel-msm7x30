@@ -1,6 +1,7 @@
 /* Source for:
  * Cypress TrueTouch(TM) Standard Product touchscreen driver.
  * drivers/input/touchscreen/cyttsp_core.c
+ * Thx Knot
  *
  * Copyright (C) 2009, 2010 Cypress Semiconductor, Inc.
  *
@@ -41,8 +42,7 @@
 #include <linux/cyttsp.h>
 #include <linux/ctype.h>
 #include "cyttsp_core.h"
-
-#define DBG(x)
+#define DBG(x) x
 
 /* rely on kernel input.h to define Multi-Touch capability */
 #ifndef ABS_MT_TRACKING_ID
@@ -450,6 +450,9 @@ static int ttsp_write_block_data(struct cyttsp *ts, u8 command,
 	DBG(print_data_block(__func__, command, length, buf);)
 	return rc;
 }
+
+ #undef DBG
+ #define DBG(x)
 
 static int ttsp_tch_ext(struct cyttsp *ts, void *buf)
 {
