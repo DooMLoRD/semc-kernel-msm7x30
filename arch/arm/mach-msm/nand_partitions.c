@@ -74,19 +74,14 @@ static int __init parse_tag_msm_partition(const struct tag *tag)
 		ptn->offset = entry->offset;
 		ptn->size = entry->size;
 
-		printk(KERN_INFO "Partition (from atag) %s -- Offset:%llx Size:%llx\n",ptn->name, ptn->offset, ptn->size);
+		printk(KERN_INFO "Partition (from atag) %s "
+				"-- Offset:%llx Size:%llx\n",
+				ptn->name, ptn->offset, ptn->size);
 
 		name += 16;
 		entry++;
 		ptn++;
 	}
-	 ptn = &msm_nand_partitions[count];
-	 ptn->name ="boot";
-	 ptn->offset = 0x00000280;
-	 ptn->size = 0x00000064;
-//	 ptn->ecclayout = mtd->ecclayout;
-	 printk("Partition (from atag) %s -- Offset:%llx Size:%llx\n", ptn->name, ptn->offset, ptn->size);
-	 count++;
 
 	msm_nand_data.nr_parts = count;
 	msm_nand_data.parts = msm_nand_partitions;
@@ -128,7 +123,7 @@ static int get_nand_partitions(void)
 	int part;
 
 	if (msm_nand_data.nr_parts)
-	return 0;
+		return 0;
 
 	partition_table = (struct flash_partition_table *)
 	    smem_alloc(SMEM_AARM_PARTITION_TABLE,
@@ -137,7 +132,7 @@ static int get_nand_partitions(void)
 	if (!partition_table) {
 		printk(KERN_WARNING "%s: no flash partition table in shared "
 		       "memory\n", __func__);
-	return -ENOENT;
+		return -ENOENT;
 	}
 
 	if ((partition_table->magic1 != (u32) FLASH_PART_MAGIC1) ||

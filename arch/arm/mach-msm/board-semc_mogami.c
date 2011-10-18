@@ -74,6 +74,9 @@
 #include "board-semc_mogami-keypad.h"
 #include "board-semc_mogami-gpio.h"
 #include <linux/usb/android_composite.h>
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+#include <linux/usb/f_accessory.h>
+#endif
 #include "pm.h"
 #include "spm.h"
 #include <linux/msm_kgsl.h>
@@ -184,7 +187,6 @@
 #define MSM_GPU_PHYS_SIZE       SZ_2M
 #define MSM_PMEM_CAMERA_SIZE    0x3200000
 #define MSM_PMEM_ADSP_SIZE      0x1800000
-//#define MSM_PMEM_SWIQI_SIZE     0xE00000
 #define PMEM_KERNEL_EBI1_SIZE   0x600000
 #define MSM_PMEM_AUDIO_SIZE     0x200000
 
@@ -1676,8 +1678,16 @@ static char *usb_functions_rndis_adb[] = {
 	"adb",
 };
 
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+static char *usb_functions_accessory[] = { "accessory" };
+static char *usb_functions_accessory_adb[] = { "accessory", "adb" };
+#endif
+
 static char *usb_functions_all[] = {
 	"rndis",
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+	"accessory",
+#endif
 	"usb_mass_storage",
 #if defined(CONFIG_USB_ANDROID_MTP_ARICENT)
 	"mtp",
@@ -1738,6 +1748,20 @@ static struct android_usb_product usb_products[] = {
 		.num_functions	= ARRAY_SIZE(usb_functions_msc_adb_eng),
 		.functions	= usb_functions_msc_adb_eng,
 	},
+#ifdef CONFIG_USB_ANDROID_ACCESSORY
+	{
+		.vendor_id      = USB_ACCESSORY_VENDOR_ID,
+		.product_id     = USB_ACCESSORY_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_accessory),
+		.functions      = usb_functions_accessory,
+	},
+	{
+		.vendor_id      = USB_ACCESSORY_VENDOR_ID,
+		.product_id     = USB_ACCESSORY_ADB_PRODUCT_ID,
+		.num_functions  = ARRAY_SIZE(usb_functions_accessory_adb),
+		.functions      = usb_functions_accessory_adb,
+	},
+#endif
 };
 
 static struct usb_mass_storage_platform_data mass_storage_pdata = {
@@ -1750,6 +1774,12 @@ static struct usb_mass_storage_platform_data mass_storage_pdata = {
 	.cdrom_vendor = "SEMC",
 	.cdrom_product = "CD-ROM",
 	.cdrom_release = 0x0100,
+
+	/* EUI-64 based identifier format */
+	.eui64_id = {
+		.ieee_company_id = {0x00, 0x0A, 0xD9},
+		.vendor_specific_ext_field = {0x00, 0x00, 0x00, 0x00, 0x00},
+	},
 };
 
 static struct platform_device usb_mass_storage_device = {
@@ -1830,6 +1860,7 @@ static int __init board_serialno_setup(char *serialno)
 	}
 	usb_serial_number[20] = '\0';
 	android_usb_pdata.serial_number = usb_serial_number;
+	mass_storage_pdata.serial_number = usb_serial_number;
 
 	printk(KERN_INFO "USB serial number: %s\n",
 			android_usb_pdata.serial_number);
@@ -2490,7 +2521,7 @@ static int cyttsp_xres(void)
 		       __func__, rc);
 		return -EIO;
 	}
-	udelay(250);
+	msleep(1);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_RESET, polarity);
 	return 0;
 }
@@ -2530,9 +2561,13 @@ static int cyttsp_wakeup(void)
 		__func__);
                 return ret;
 	}
-	msleep(10);
+	msleep(50);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 0);
-	udelay(250);
+	msleep(1);
+	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 1);
+	udelay(100);
+	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 0);
+	msleep(1);
 	gpio_set_value(CYPRESS_TOUCH_GPIO_IRQ, 1);
 	printk(KERN_INFO "%s: wakeup\n", __func__);
 	ret = gpio_direction_input(CYPRESS_TOUCH_GPIO_IRQ);
@@ -2541,7 +2576,7 @@ static int cyttsp_wakeup(void)
 		__func__);
 		return ret;
 	}
-	msleep(3);
+	msleep(50);
 	return 0;
 }
 
@@ -2670,6 +2705,7 @@ static struct synaptics_button synaptics_back_key = {
 
 static struct synaptics_funcarea clearpad_funcarea_array[] = {
 	{ 0, 0, 479, 853, SYN_FUNCAREA_POINTER, NULL },
+	{ 0, 854, 479, 863, SYN_FUNCAREA_BOTTOM_EDGE, NULL},
 	{ 0, 884, 159, 921, SYN_FUNCAREA_BUTTON, &synaptics_back_key },
 	{ 0, 864, 179, 921, SYN_FUNCAREA_BTN_INBOUND, &synaptics_back_key },
 	{ 320, 884, 479, 921, SYN_FUNCAREA_BUTTON, &synaptics_menu_key },
@@ -2931,9 +2967,11 @@ static struct registers bma250_reg_setup = {
 	.int_mode_ctrl        = BMA250_MODE_SLEEP_50MS,
 	.int_enable1          = BMA250_INT_SLOPE_Z |
 				BMA250_INT_SLOPE_Y |
-				BMA250_INT_SLOPE_X,
+				BMA250_INT_SLOPE_X |
+				BMA250_INT_ORIENT,
 	.int_enable2          = BMA250_INT_NEW_DATA,
-	.int_pin1             = BMA250_INT_PIN1_SLOPE,
+	.int_pin1             = BMA250_INT_PIN1_SLOPE |
+				BMA250_INT_PIN1_ORIENT,
 	.int_new_data         = BMA250_INT_PIN1,
 	.int_pin2             = -1,
 };
@@ -3475,12 +3513,6 @@ static struct android_pmem_platform_data android_pmem_adsp_cached_pdata = {
 	.cached = 1,
 };
 
-//static struct android_pmem_platform_data android_pmem_swiqi_pdata = {
-//	.name = "pmem_swiqi",
-//	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
-//	.cached = 1,
-//};
-
 static struct android_pmem_platform_data android_pmem_camera_pdata = {
 	.name = "pmem_camera",
 	.allocator_type = PMEM_ALLOCATORTYPE_BITMAP,
@@ -3510,11 +3542,6 @@ static struct platform_device android_pmem_adsp_cached_device = {
 	.id = 5,
 	.dev = {.platform_data = &android_pmem_adsp_cached_pdata},
 };
-//static struct platform_device android_pmem_swiqi_device = {
-//	.name = "android_pmem",
-//	.id = 6,
-//	.dev = {.platform_data = &android_pmem_swiqi_pdata},
-//};
 
 static struct platform_device android_pmem_camera_device = {
 	.name = "android_pmem",
@@ -3891,7 +3918,6 @@ static struct platform_device *devices[] __initdata = {
 	&android_pmem_kernel_ebi1_device,
 	&android_pmem_adsp_device,
 	&android_pmem_adsp_cached_device,
-//	&android_pmem_swiqi_device,
 	&android_pmem_camera_device,
 	&android_pmem_audio_device,
 	&msm_device_i2c,
@@ -4623,13 +4649,6 @@ static void __init pmem_adsp_size_setup(char **p)
 
 __early_param("pmem_adsp_size=", pmem_adsp_size_setup);
 
-//static unsigned pmem_swiqi_size = MSM_PMEM_SWIQI_SIZE;
-//static void __init pmem_swiqi_size_setup(char **p)
-//{
-//	pmem_swiqi_size = memparse(*p, p);
-//}
-
-//__early_param("pmem_swiqi_size=", pmem_swiqi_size_setup);
 
 static unsigned pmem_camera_size = MSM_PMEM_CAMERA_SIZE;
 static void __init pmem_camera_size_setup(char **p)
@@ -4688,7 +4707,7 @@ static void __init msm7x30_allocate_memory_regions(void)
 	size = pmem_adsp_size;
 
 	if (size) {
-		addr = alloc_bootmem(size);
+		addr = __alloc_bootmem(size, 8*1024, __pa(MAX_DMA_ADDRESS));
 		android_pmem_adsp_pdata.start = __pa(addr);
 		android_pmem_adsp_pdata.size = size;
 		pr_info("allocating %lu bytes at %p (%lx physical) for adsp "
@@ -4699,16 +4718,6 @@ static void __init msm7x30_allocate_memory_regions(void)
 		pr_info("setting %lu bytes at %p (%lx physical) for adsp cached "
 			"pmem arena\n", size, addr, __pa(addr));
 	}
-
-//	size = pmem_swiqi_size;
-//
-//	if (size) {
-//		addr = alloc_bootmem(size);
-//		android_pmem_swiqi_pdata.start = __pa(addr);
-//		android_pmem_swiqi_pdata.size = size;
-//		pr_info("allocating %lu bytes at %p (%lx physical) for swiqi "
-//			"pmem arena\n", size, addr, __pa(addr));
-//	}
 
 	size = pmem_camera_size;
 	if (size) {

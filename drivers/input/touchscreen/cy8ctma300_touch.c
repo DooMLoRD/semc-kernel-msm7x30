@@ -1148,15 +1148,10 @@ static int cy8ctma300_deferred_init(struct cy8ctma300_touch *this)
 	set_bit(ABS_MT_TRACKING_ID, this->input->absbit);
 
 	/* Single-Touch stuff */
-/*	input_set_abs_params(input_dev, ABS_X, pdata->x_min,
+	input_set_abs_params(input_dev, ABS_X, pdata->x_min,
 		pdata->x_max, 0, 0);
 	input_set_abs_params(input_dev, ABS_Y, pdata->y_min,
-		pdata->y_max, 0, 0); */
-		input_set_abs_params(input_dev, ABS_X, 0,
-		480, 0, 0);
-	input_set_abs_params(input_dev, ABS_Y, 0,
-		854, 0, 0);
-	
+		pdata->y_max, 0, 0);
 	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 255, 0, 0);
 
 	err = input_register_device(input_dev);
