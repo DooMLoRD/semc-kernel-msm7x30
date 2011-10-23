@@ -722,8 +722,7 @@ CONFIG_IP_NF_ARP_MANGLE=y
 # CONFIG_WAN_ROUTER is not set
 # CONFIG_PHONET is not set
 # CONFIG_IEEE802154 is not set
-# CONFIG_NET_SCHED is not set
-# CONFIG_DCB is not set
+CONFIG_NET_SCHED=y
 
 #
 # Network testing
