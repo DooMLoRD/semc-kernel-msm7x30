@@ -1,4 +1,4 @@
-/* /kernel/arch/arm/mach-msm/leds-mango.c
+/* /kernel/arch/arm/mach-msm/leds-smultron.c
  *
  * Copyright (C) [2010] Sony Ericsson Mobile Communications AB.
  *
@@ -15,32 +15,39 @@ static struct as3676_platform_led as3676_leds_mapping[] = {
 	{
 		.name = "lcd-backlight",
 		.sinks = BIT(AS3676_SINK_01),
-		.flags = AS3676_FLAG_ALS | AS3676_FLAG_WAIT_RESUME,
+		.flags = AS3676_FLAG_ALS | AS3676_FLAG_DLS
+		| AS3676_FLAG_WAIT_RESUME,
 		.max_current = 25000,
 		.default_brightness = LED_FULL,
 	},
 	{
-		.name = "button-backlight",
-		.sinks = BIT(AS3676_SINK_RGB1) | BIT(AS3676_SINK_RGB2),
-		.flags = AS3676_FLAG_ALS_GROUP2,
+		.name = "button-backlight-rgb1",
+		.sinks = BIT(AS3676_SINK_RGB1),
+		.flags = AS3676_FLAG_ALS,
+		.max_current = 25000,
+	},
+	{
+		.name = "button-backlight-rgb2",
+		.sinks = BIT(AS3676_SINK_RGB2),
+		.flags = AS3676_FLAG_ALS,
 		.max_current = 25000,
 	},
 	{
 		.name = "red",
 		.sinks = BIT(AS3676_SINK_41),
-		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
+		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK | AS3676_FLAG_ALS,
 		.max_current = 25000,
 	},
 	{
 		.name = "green",
 		.sinks = BIT(AS3676_SINK_42),
-		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
+		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK | AS3676_FLAG_ALS,
 		.max_current = 25000,
 	},
 	{
 		.name = "blue",
 		.sinks = BIT(AS3676_SINK_43),
-		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK,
+		.flags = AS3676_FLAG_RGB | AS3676_FLAG_BLINK | AS3676_FLAG_ALS,
 		.max_current = 25000,
 	},
 };
@@ -50,6 +57,6 @@ struct as3676_platform_data as3676_platform_data = {
 	.num_leds = ARRAY_SIZE(as3676_leds_mapping),
 	.als_connected = 1,
 	.als_wait = 100,
-	.dls_connected = false,
-	.ldo_mV = 3300,
+	.dls_connected = true,
+	.ldo_mV = 3000,
 };
