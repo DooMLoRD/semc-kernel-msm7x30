@@ -3,8 +3,8 @@ DooMKernel (CM7) for Xperia 2011 line based on FXP CM Kernel for Xperia 2011 lin
 https://github.com/freexperia/semc-kernel-msm7x30
 
 
-kernel configs:
----------------
+kernel configs of supported devices:
+------------------------------------
 
 [fxp_anzu_defconfig]
 Device   : Xperia Arc
@@ -16,28 +16,4 @@ Device   : Xperia Play
 Model No.: R800
 Codename : zeus
 
-[fxp_hallon_defconfig]
-Device   : Xperia Neo
-Model No.: MT15
-Codename : hallon
-
-[fxp_mango_defconfig]
-Device   : Xperia Mini Pro
-Model No.: SK17
-Codename : mango
-
-[fxp_smultron_defconfig]
-Device   : Xperia Mini
-Model No.: ST15
-Codename : smultron
-
-[fxp_urushi_defconfig]
-Device   : Xperia Ray
-Model No.: ST18
-Codename : urushi
-
-[fxp_iyokan_defconfig]
-Device   : Xperia Pro
-Model No.: MK16
-Codename : iyokan
 
