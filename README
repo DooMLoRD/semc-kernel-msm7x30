@@ -1,4 +1,4 @@
-DooMKernel (CM7) for Xperia 2011 line based on FXP CM Kernel for Xperia 2011 line
+DooMKernel (CM7/MiUI) for Xperia 2011 line based on FXP CM Kernel for Xperia 2011 line
 
 https://github.com/freexperia/semc-kernel-msm7x30
 
@@ -6,12 +6,26 @@ https://github.com/freexperia/semc-kernel-msm7x30
 kernel configs of supported devices:
 ------------------------------------
 
+<CM7>
+
 [fxp_anzu_defconfig]
 Device   : Xperia Arc
 Model No.: LT15 / LT18
 Codename : anzu
 
 [fxp_zeus_defconfig]
+Device   : Xperia Play
+Model No.: R800
+Codename : zeus
+
+<MiUI>
+
+[fxp_anzu_miui_defconfig]
+Device   : Xperia Arc
+Model No.: LT15 / LT18
+Codename : anzu
+
+[fxp_zeus_miui_defconfig]
 Device   : Xperia Play
 Model No.: R800
 Codename : zeus
