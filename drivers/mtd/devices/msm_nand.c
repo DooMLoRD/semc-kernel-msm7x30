@@ -6687,6 +6687,8 @@ int msm_nand_scan(struct mtd_info *mtd, int maxchips)
 	uint8_t index;
 	uint32_t wr_rd_bsygap;
 	uint32_t recovery_cycle;
+	uint32_t cfg0_boot, cfg0_yaffs2;
+	uint32_t cfg1_boot, cfg1_yaffs2;
 
 	/* Probe the Flash device for ONFI compliance */
 	if (!flash_onfi_probe(chip)) {
@@ -6733,25 +6735,43 @@ int msm_nand_scan(struct mtd_info *mtd, int maxchips)
 		pr_err("Unsupported Nand,Id: 0x%x \n", flash_id);
 		return -ENODEV;
 	}
+	
+	//default for all yaffs2 mtd's
+	cfg0_yaffs2 = ((mtd_writesize >> 9) << 6) /* 4/8 codeword per page for 2/4k nand */
+	| (516 << 9) /* 516 user data bytes */
+	| (10 << 19) /* 10 parity bytes */
+	| (5 << 27) /* 5 address cycles */
+	| (0 << 30) /* Dont read status before data */
+	| (1 << 31) /* Send read cmd *//* 0 spare bytes for 16 bit nand or 1 spare bytes for 8 bit */
+	| ((wide_bus) ? (0 << 23) : (1 << 23));
+	
+	cfg1_yaffs2 = (0 << 0) /* Enable ecc */
+	| (recovery_cycle << 2) /* (value+1) recovery cycles */
+	| (0 << 5) /* Allow CS deassertion */
+	| ((mtd_writesize - (528 * ((mtd_writesize >> 9) -1)) +1) << 6)/* Bad block marker location */
+	| (0 << 16) /* Bad block in user data area */
+	| (wr_rd_bsygap << 17) /* (value+1)x2 clock cycle tWB/tRB */
+	| (wide_bus << 1); /* Wide flash bit */
 
-	chip->CFG0 = (((mtd_writesize >> 9)-1) << 6) /* 4/8 cw/pg for 2/4k */
-		|  (516 <<  9)  /* 516 user data bytes */
-		|   (10 << 19)  /* 10 parity bytes */
-		|    (5 << 27)  /* 5 address cycles */
-		|    (0 << 30)  /* Do not read status before data */
-		|    (1 << 31)  /* Send read cmd */
-		/* 0 spare bytes for 16 bit nand or 1 spare bytes for 8 bit */
-		| ((wide_bus) ? (0 << 23) : (1 << 23));
+	//special config for kernel mtd
+	cfg0_boot = ((mtd_writesize >> 9)<< 6) /* 4/8 codeword per page for 2/4k nand */
+	| (512 << 9) /* 512 user data bytes */
+	| (10 << 19) /* 10 parity bytes */
+	| (5 << 27) /* 5 address cycles */
+	| (0 << 30) /* Do not read status before data */
+	| (1 << 31) /* Send read cmd */
+	| (4 << 23); /* 4 spare bytes */
 
-	chip->CFG1 = (0 <<  0)  /* Enable ecc */
-		|    ((recovery_cycle) <<  2)  /* (value+1) recovery cycles */
-		|    (0 <<  5)  /* Allow CS deassertion */
-		|  ((mtd_writesize - (528 * ((mtd_writesize >> 9) - 1)) + 1)
-				<<  6)  /* Bad block marker location */
-		|    (0 << 16)  /* Bad block in user data area */
-		|    ((wr_rd_bsygap) << 17)  /* (value+1)x2 clock cycle */
-		| (wide_bus << 1); /* Wide flash bit */
+	cfg1_boot = (0 << 0) /* Enable ecc */
+	| (recovery_cycle << 2) /* (value+1) recovery cycles */
+	| (0 << 5) /* Allow CS deassertion */
+	| ((mtd_writesize - (528 * ((mtd_writesize >> 9) -1)) +1) << 6) /* Bad block marker location */
+	| (0 << 16) /* Bad block in user data area */
+	| (wr_rd_bsygap << 17) /* (value+1)x2 clock cycle tWB/tRB */
+	| (wide_bus << 1); /* Wide flash bit */
 
+	chip->CFG0 = cfg0_yaffs2;
+	chip->CFG1 = cfg1_yaffs2;
 	chip->ecc_buf_cfg = 0x203;
 
 	pr_info("CFG0 Init  : 0x%08x \n", chip->CFG0);
