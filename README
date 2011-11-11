@@ -20,14 +20,13 @@ Codename : zeus
 
 <MiUI>
 
-[fxp_anzu_miui_defconfig]
+[doom_anzu_miui_defconfig]
 Device   : Xperia Arc
 Model No.: LT15 / LT18
 Codename : anzu
 
-[fxp_zeus_miui_defconfig]
+[doom_zeus_miui_defconfig]
 Device   : Xperia Play
 Model No.: R800
 Codename : zeus
-
 
